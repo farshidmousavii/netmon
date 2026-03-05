@@ -71,8 +71,17 @@ func ParseVendorSNMP(oid string) string {
 		"12356": "fortinet",
 		"11":    "hp",
 	}
-	enterpriseID := strings.Split(oid, ".")[7]
-	return enterpriseMAP[enterpriseID]
+
+	parts := strings.Split(oid, ".")
+    if len(parts) < 8 {
+        return "unknown" 
+	} 
+
+    enterpriseID := parts[7]
+    if vendor, ok := enterpriseMAP[enterpriseID]; ok {
+        return vendor
+    }
+    return "unknown"
 
 }
 

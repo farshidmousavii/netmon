@@ -22,12 +22,16 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 
 	cred, err := cfg.GetCredential(deviceCfg.Credential)
 	if err != nil {
-		logger.Error("Device %s: %v", deviceCfg.Name, err)
+		logger.Error("device %s: failed to get credential: %v", deviceCfg.Name, err)
+		report.Error = err  
+		reports <- report
+		return  
 	}
 
 	// new device
 	device, err := newDevice(deviceCfg, cred)
 	if err != nil {
+		logger.Error("device %s: failed to create: %v", deviceCfg.Name, err)
 		report.Error = err
 		reports <- report
 		return
@@ -36,7 +40,8 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 	// Ping
 	pingTime, err := device.Ping()
 	if err != nil {
-		report.Error = fmt.Errorf("ping failed: %w", err)
+		logger.Error("device %s: ping failed: %v", device.IP, err)
+		report.Error = fmt.Errorf("device %s: ping failed: %w", device.IP, err)
 		reports <- report
 		return
 	}
@@ -48,14 +53,14 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 	if cfg.SNMP != nil {
 		oid, err := device.GetVendorSNMP(cfg.SNMP.Community, cfg.SNMP.Timeout)
 		if err != nil {
-			logger.Warning("Failed to get vendor via SNMP for %s: %v", device.IP, err)
+			logger.Warning("device %s: Failed to get vendor via SNMP : %v", device.IP, err)
 		} else {
 			report.SNMPInfo.Vendor = snmp.ParseVendorSNMP(oid)
 		}
 
 		host, err := device.GetHostnameSNMP(cfg.SNMP.Community, cfg.SNMP.Timeout)
 		if err != nil {
-			logger.Warning("Failed to get hostname via SNMP for %s: %v", device.IP, err)
+			logger.Warning("device %s: Failed to get hostname via SNMP: %v", device.IP, err)
 		} else {
 			report.SNMPInfo.Hostname = host
 			hostName = host
@@ -63,7 +68,7 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 
 		uptime, err := device.GetUPTimeSNMP(cfg.SNMP.Community, cfg.SNMP.Timeout)
 		if err != nil {
-			logger.Warning("Failed to get uptime via SNMP for %s: %v", device.IP, err)
+			logger.Warning("device %s: Failed to get uptime via SNMP: %v", device.IP, err)
 		} else {
 			report.SNMPInfo.Uptime = uptime
 		}
@@ -74,7 +79,8 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 
 	output , err := device.ShowCommand()
 	if err !=nil {
-		report.Error = fmt.Errorf("can't get backup: %w" , err)
+		logger.Error("device %s: failed to get config: %v", device.IP, err)
+		report.Error = fmt.Errorf("device %s: failed to get config: %w", device.IP, err)
 		reports <- report
 		return
 	}
@@ -86,7 +92,8 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 
 	filePath ,err := backup.WriteToFile(target,device.Type() ,output , cfg.Backup.Directory , cfg.Backup.ArchivePath)
 	if err !=nil {
-		report.Error = fmt.Errorf("can not wirte to file: %w" , err)
+		logger.Error("device %s: failed to write backup: %v", device.IP, err)
+		report.Error = fmt.Errorf("device %s: failed to write backup: %w", device.IP, err)
 		reports <- report
 		return
 	}

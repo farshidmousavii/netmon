@@ -75,7 +75,7 @@ func (d Device) ShowCommand() (string, error) {
 	}
 
 	if cmErr != nil {
-		return "", fmt.Errorf("cannot run command %s on %s: %w", cmd, d.IP, err)
+		return "", fmt.Errorf("cannot run command %s on %s: %w", cmd, d.IP, cmErr)
 	}
 
 	if ciscooutput != "" {
@@ -88,7 +88,7 @@ func (d Device) ShowCommand() (string, error) {
 }
 
 
-func getDeviceIP(d DeviceInfo) string {
+func GetDeviceIP(d DeviceInfo) string {
 	if dev, ok := d.(Device); ok {
 		return dev.IP
 	}
