@@ -1,0 +1,28 @@
+# Runtime
+backup/
+logs/
+log/
+
+# Config files
+config.yaml
+.env
+
+# Build outputs
+netmon
+netmon.exe
+*.exe
+dist/
+bin/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.mypy_cache/
+
+
+# Dependencies
+vendor/
