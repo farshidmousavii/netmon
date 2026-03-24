@@ -12,7 +12,8 @@ A CLI tool for monitoring and backing up network devices (Cisco & Mikrotik).
 - ✅ YAML configuration with environment variables
 - ✅ JSON output support
 - ✅ Configuration diff tool
-- ✅ Flexible command-line flags
+- ✅ Easy setup with `init` command
+- ✅ Flexible command-line interface
 
 ## Limitations
 
@@ -24,35 +25,60 @@ A CLI tool for monitoring and backing up network devices (Cisco & Mikrotik).
 
 ## Installation
 
+### Option 1: Build from Source
 ```bash
 git clone https://github.com/farshidmousavii/netmon.git
 cd netmon
 go build -o netmon-cli ./cmd/netmon
 ```
 
+### Option 2: Download Binary (Coming Soon)
+
+Pre-built binaries will be available in [Releases](https://github.com/farshidmousavii/netmon/releases).
+
+## Quick Start
+```bash
+# 1. Initialize config files
+./netmon-cli init
+
+# 2. Edit config.yaml with your devices
+nano config.yaml
+
+# 3. Edit .env with your credentials
+nano .env
+
+# 4. Run monitoring
+./netmon-cli
+```
+
 ## Configuration
 
-1. Copy example files:
+### Automatic Setup
+```bash
+./netmon-cli init
+```
 
+This creates:
+- `config.yaml` - Device configuration template
+- `.env` - Credentials template
+
+### Manual Setup
+
+1. Copy example files:
 ```bash
 cp configs/config.example.yaml config.yaml
 cp .env.example .env
 ```
 
-2. Edit `config.yaml` with your devices
-
+2. Edit `config.yaml`:
 ```yaml
 version: 1
 
 credentials:
-  default:
-    username: admin
-    password: ${DEVICE_PASSWORD}
-
   cisco:
     username: admin
     password: ${CISCO_PASSWORD}
-
+  
   mikrotik:
     username: admin
     password: ${MIKROTIK_PASSWORD}
@@ -79,8 +105,7 @@ backup:
   archive_path: ""
 ```
 
-3. Edit `.env` with your credentials
-
+3. Edit `.env`:
 ```env
 CISCO_PASSWORD=yourpassword
 MIKROTIK_PASSWORD=yourpassword
@@ -89,8 +114,23 @@ SNMP_COMMUNITY=public
 
 ## Usage
 
-### Monitoring
+### Commands
+```bash
+# Show help
+./netmon-cli --help
 
+# Initialize config files
+./netmon-cli init
+
+# Run monitoring (default command)
+./netmon-cli
+./netmon-cli monitor
+
+# Compare backup files
+./netmon-cli diff <file1> <file2>
+```
+
+### Monitoring Examples
 ```bash
 # Basic run with console output
 ./netmon-cli
@@ -111,35 +151,30 @@ SNMP_COMMUNITY=public
 ./netmon-cli --config /path/to/config.yaml
 
 # Combine flags
-./netmon-cli -l --skip-backup
+./netmon-cli -l --skip-backup --json
 ```
 
-### Configuration Diff
+### Diff Examples
 
 Compare two backup files to see what changed:
-
 ```bash
-./netmon-cli diff <file1> <file2>
-
-# Example
 ./netmon-cli diff backups/cisco/2025-03-05_14-30-00/Core-SW-01.txt \
                   backups/cisco/2025-03-06_14-30-00/Core-SW-01.txt
 ```
 
 ### Available Flags
 
-| Flag            | Description                                |
-| --------------- | ------------------------------------------ |
-| `-l`            | Enable file logging                        |
-| `--config`      | Path to config file (default: config.yaml) |
-| `--skip-backup` | Skip backup, only health check             |
-| `--skip-snmp`   | Skip SNMP queries                          |
-| `--json`        | Output report as JSON                      |
+| Command | Flag | Short | Description |
+|---------|------|-------|-------------|
+| Global | `--config` | | Path to config file (default: config.yaml) |
+| monitor | `--log` | `-l` | Enable file logging |
+| monitor | `--skip-backup` | | Skip backup, only health check |
+| monitor | `--skip-snmp` | | Skip SNMP queries |
+| monitor | `--json` | `-j` | Output report as JSON |
 
 ## Output
 
 ### Console Report
-
 ```
 ═══════════════════════════════════════════════════════════
            NETWORK DEVICE MONITORING REPORT
@@ -186,13 +221,11 @@ Summary:
 ```
 
 ### JSON Output
-
 ```bash
 ./netmon-cli --json
 ```
 
 Generates a timestamped JSON report in `reports/` directory:
-
 ```json
 [
   {
@@ -208,26 +241,11 @@ Generates a timestamped JSON report in `reports/` directory:
     },
     "BackupPath": "backups/cisco/2025-03-05_14-30-00/Core-SW-01.txt",
     "Error": null
-  },
-  {
-    "Name": "edge-router",
-    "IP": "192.168.2.2",
-    "Type": "mikrotik",
-    "Online": true,
-    "PingTime": "1ms",
-    "SNMPInfo": {
-      "Hostname": "Edge-Router-01",
-      "Vendor": "mikrotik",
-      "Uptime": "12 days, 08:15:30"
-    },
-    "BackupPath": "backups/mikrotik/2025-03-05_14-30-00/Edge-Router-01.rsc",
-    "Error": null
   }
 ]
 ```
 
 ### Diff Output
-
 ```
 Found 3 differences:
 
@@ -251,23 +269,73 @@ Line 89:
 - SNMP enabled (optional)
 
 ## Project Structure
-
 ```
 netmon/
 ├── cmd/
-│   └── netmon/           # Main entry point
+│   ├── cli/                # CLI commands & subcommands (Cobra)
+│   │   ├── root.go         # Root command & global flags
+│   │   ├── monitor.go      # Monitoring command
+│   │   ├── diff.go         # Config diff command
+│   │   └── init.go         # Initialize config files
+│   └── netmon/
+│       └── main.go         # Entry point
 ├── internal/
-│   ├── backup/           # Backup and diff logic
-│   ├── config/           # Configuration management
-│   ├── device/           # Device operations
-│   ├── logger/           # Structured logging
-│   ├── report/           # Report generation
-│   └── snmp/             # SNMP operations
+│   ├── backup/
+│   │   ├── backup.go       # Backup logic with atomic writes
+│   │   └── diff.go         # File comparison
+│   ├── config/
+│   │   ├── config.go       # YAML config loader
+│   │   └── types.go        # Config structs
+│   ├── device/
+│   │   ├── check.go        # Device health check
+│   │   ├── device.go       # Device operations
+│   │   ├── ping.go         # Ping implementation
+│   │   ├── ssh.go          # SSH connection & commands
+│   │   └── types.go        # Device structs
+│   ├── logger/
+│   │   └── logger.go       # Structured logging
+│   ├── report/
+│   │   ├── report.go       # Console report formatting
+│   │   ├── json.go         # JSON report generation
+│   │   └── type.go         # Report structs
+│   └── snmp/
+│       ├── snmp.go         # SNMP operations
+│       └── types.go        # SNMP structs
 ├── configs/
-│   └── config.example.yaml
-├── .env.example
+│   └── config.example.yaml # Example configuration
+├── .env.example            # Example credentials
+├── .gitignore
+├── go.mod
+├── go.sum
+├── LICENSE
 └── README.md
 ```
+
+**Runtime directories (created automatically):**
+```
+├── backups/                # Device configuration backups
+├── reports/                # JSON reports
+└── logs/                   # Log files (when using -l flag)
+```
+
+## Development
+```bash
+# Run without building
+go run ./cmd/netmon
+
+# Build
+go build -o netmon-cli ./cmd/netmon
+
+# Run tests (if available)
+go test ./...
+
+# Format code
+go fmt ./...
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
