@@ -2,6 +2,7 @@ package device
 
 import (
 	"fmt"
+	"regexp"
 	"sync"
 
 	"github.com/farshidmousavii/netmon/internal/backup"
@@ -11,7 +12,7 @@ import (
 	"github.com/farshidmousavii/netmon/internal/snmp"
 )
 
-func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.WaitGroup, reports chan<- report.DeviceReport , skipBackup bool) {
+func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.WaitGroup, reports chan<- report.DeviceReport, skipBackup bool) {
 	defer wg.Done()
 
 	report := report.DeviceReport{
@@ -23,9 +24,9 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 	cred, err := cfg.GetCredential(deviceCfg.Credential)
 	if err != nil {
 		logger.Error("device %s: failed to get credential: %v", deviceCfg.Name, err)
-		report.Error = err  
+		report.Error = err
 		reports <- report
-		return  
+		return
 	}
 
 	// new device
@@ -74,32 +75,42 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 		}
 	}
 
-
 	//  Backup
-	if !skipBackup{
+	if !skipBackup {
 
-	output , err := device.ShowCommand()
-	if err !=nil {
-		logger.Error("device %s: failed to get config: %v", device.IP, err)
-		report.Error = fmt.Errorf("device %s: failed to get config: %w", device.IP, err)
-		reports <- report
-		return
-	}
-	
-	target := hostName
-	if target == "" {
-		target = device.IP
-	}
+		output, err := device.ShowCommand()
+		if err != nil {
+			logger.Error("device %s: failed to get config: %v", device.IP, err)
+			report.Error = fmt.Errorf("device %s: failed to get config: %w", device.IP, err)
+			reports <- report
+			return
+		}
 
-	filePath ,err := backup.WriteToFile(target,device.Type() ,output , cfg.Backup.Directory , cfg.Backup.ArchivePath)
-	if err !=nil {
-		logger.Error("device %s: failed to write backup: %v", device.IP, err)
-		report.Error = fmt.Errorf("device %s: failed to write backup: %w", device.IP, err)
-		reports <- report
-		return
+		target := hostName
+		if target == "" {
+			target = extractHostname(output)
+		}
+
+		filePath, err := backup.WriteToFile(target, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
+		if err != nil {
+			logger.Error("device %s: failed to write backup: %v", device.IP, err)
+			report.Error = fmt.Errorf("device %s: failed to write backup: %w", device.IP, err)
+			reports <- report
+			return
+		}
+		report.BackupPath = filePath
 	}
-	report.BackupPath = filePath
-}
 	reports <- report
 
+}
+
+func extractHostname(backupConfig string) string {
+	re := regexp.MustCompile(`\bhostname\s+(\S+)`)
+	match := re.FindStringSubmatch(backupConfig)
+
+	if len(match) > 1 {
+		return match[1]
+	}
+
+	return ""
 }
