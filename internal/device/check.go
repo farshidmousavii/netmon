@@ -88,7 +88,7 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 
 		target := hostName
 		if target == "" {
-			target = extractHostname(output)
+			target = extractHostname(device.Type(), output)
 		}
 
 		filePath, err := backup.WriteToFile(target, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
@@ -104,9 +104,18 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 
 }
 
-func extractHostname(backupConfig string) string {
-	re := regexp.MustCompile(`\bhostname\s+(\S+)`)
-	match := re.FindStringSubmatch(backupConfig)
+func extractHostname(deviceType, backupConfig string) string {
+
+	var match []string
+
+	switch deviceType {
+	case "cisco":
+		re := regexp.MustCompile(`\bhostname\s+(\S+)`)
+		match = re.FindStringSubmatch(backupConfig)
+	case "mikrotik":
+		re := regexp.MustCompile(`(?m)^set\s+name=([^\s]+)`)
+		match = re.FindStringSubmatch(backupConfig)
+	}
 
 	if len(match) > 1 {
 		return match[1]
