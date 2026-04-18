@@ -6,10 +6,73 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sync"
 	"time"
 
+	"github.com/farshidmousavii/netmon/internal/config"
+	"github.com/farshidmousavii/netmon/internal/device"
 	"github.com/farshidmousavii/netmon/internal/logger"
+	"github.com/farshidmousavii/netmon/internal/report"
 )
+
+func BackupDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.WaitGroup, reports chan<- report.DeviceReport) {
+	defer wg.Done()
+	report := report.DeviceReport{
+		Name: deviceCfg.Name,
+		IP:   deviceCfg.IP,
+		Type: deviceCfg.Vendor,
+	}
+
+	cred, err := cfg.GetCredential(deviceCfg.Credential)
+	if err != nil {
+		logger.Error("device %s: failed to get credential: %v", deviceCfg.Name, err)
+		report.Error = err
+		reports <- report
+		return
+	}
+
+	// new device
+	device, err := device.NewDevice(deviceCfg, cred)
+	if err != nil {
+		logger.Error("device %s: failed to create: %v", deviceCfg.Name, err)
+		report.Error = err
+		reports <- report
+		return
+	}
+
+	output, err := device.ShowCommand()
+	if err != nil {
+		logger.Error("device %s: failed to get config: %v", device.IP, err)
+		report.Error = fmt.Errorf("device %s: failed to get config: %w", device.IP, err)
+		reports <- report
+		return
+	}
+	// Extract hostname from config
+	hostname := extractHostname(device.Type(), output)
+	if hostname == "" {
+		hostname = device.IP
+	}
+
+	filePathAddress, err := WriteToFile(hostname, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
+	if err != nil {
+		logger.Error("device %s: failed to write backup: %v", device.IP, err)
+		report.Error = fmt.Errorf("device %s: failed to write backup: %w", device.IP, err)
+		reports <- report
+		return
+	}
+
+	if cfg.Backup.ArchivePath != "" {
+		report.BackupPath = filepath.Join(cfg.Backup.ArchivePath, device.Type(), filepath.Base(filePathAddress))
+	} else {
+
+		report.BackupPath = filePathAddress
+	}
+
+	report.Online = true
+	reports <- report
+
+}
 
 func WriteToFile(hostname, deviceType, output, backupDirectory, archivePath string) (string, error) {
 	now := time.Now().Format("2006-01-02_15-04")
@@ -181,4 +244,24 @@ func cleanupEmptyDir(dir string) {
 			logger.Info("Removed empty backup directory: %s", dir)
 		}
 	}
+}
+
+func extractHostname(deviceType, backupConfig string) string {
+
+	var match []string
+
+	switch deviceType {
+	case "cisco":
+		re := regexp.MustCompile(`\bhostname\s+(\S+)`)
+		match = re.FindStringSubmatch(backupConfig)
+	case "mikrotik":
+		re := regexp.MustCompile(`(?m)^set\s+name=([^\s]+)`)
+		match = re.FindStringSubmatch(backupConfig)
+	}
+
+	if len(match) > 1 {
+		return match[1]
+	}
+
+	return ""
 }

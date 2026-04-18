@@ -4,29 +4,28 @@ import (
 	"log"
 	"sync"
 
+	"github.com/farshidmousavii/netmon/internal/backup"
 	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/device"
 	"github.com/farshidmousavii/netmon/internal/logger"
 	"github.com/farshidmousavii/netmon/internal/report"
 	"github.com/spf13/cobra"
 )
 
-var monitorCmd = &cobra.Command{
-	Use:   "monitor",
-	Short: "Run network monitoring",
-	Run:   runMonitor,
+var backupCmd = &cobra.Command{
+	Use:   "backup",
+	Short: "Backup device configurations",
+	Run:   runBackup,
 }
 
 func init() {
-	rootCmd.AddCommand(monitorCmd)
+	rootCmd.AddCommand(backupCmd)
 
-	monitorCmd.Flags().BoolVarP(&logToFile, "log", "l", false, "enable file logging")
-	monitorCmd.Flags().BoolVar(&skipBackup, "skip-backup", false, "skip backup")
-	monitorCmd.Flags().BoolVar(&skipSNMP, "skip-snmp", false, "skip SNMP")
-	monitorCmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "output as JSON")
+	// flag for backup
+	backupCmd.Flags().BoolVarP(&logToFile, "log", "l", false, "enable file logging")
+	backupCmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "output as JSON")
 }
 
-func runMonitor(cmd *cobra.Command, args []string) {
+func runBackup(cmd *cobra.Command, args []string) {
 	if err := logger.Init(logToFile); err != nil {
 		log.Fatal(err)
 	}
@@ -40,18 +39,14 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	if skipSNMP {
-		cfg.SNMP = nil
-	}
-
 	reports := make(chan report.DeviceReport, len(cfg.Devices))
 	var wg sync.WaitGroup
 
-	logger.Info("Starting network monitor")
+	logger.Info("Starting backup")
 
 	for _, deviceCfg := range cfg.Devices {
 		wg.Add(1)
-		go device.CheckDevice(deviceCfg, cfg, &wg, reports, skipBackup)
+		go backup.BackupDevice(deviceCfg, cfg, &wg, reports)
 	}
 
 	wg.Wait()
@@ -67,8 +62,8 @@ func runMonitor(cmd *cobra.Command, args []string) {
 			log.Fatal(err)
 		}
 	} else {
-		report.PrintMonitorReport(allReports)
+		report.PrintBackupReport(allReports)
 	}
 
-	logger.Info("Network monitor completed")
+	logger.Info("Backup completed")
 }

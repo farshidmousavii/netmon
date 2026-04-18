@@ -28,7 +28,6 @@ func (d Device) GetHostName(config string, deviceType string) (string, error) {
 
 }
 
-
 func (d Device) Ping() (string, error) {
 
 	return pingDevice(d.IP)
@@ -61,10 +60,16 @@ func (d Device) ShowCommand() (string, error) {
 		cmErr          error
 		cmd            string
 	)
-
+	ciscoCommands := []string{
+		"enable",
+		d.Password,
+		"terminal length 0",
+		"show running-config",
+		"exit",
+	}
 	switch d.Type() {
 	case "cisco":
-		ciscooutput, cmErr = runCisco(session, d.Password)
+		ciscooutput, cmErr = runCisco(session, ciscoCommands)
 
 	case "mikrotik":
 		cmd = "export compact"
@@ -86,7 +91,6 @@ func (d Device) ShowCommand() (string, error) {
 	}
 
 }
-
 
 func GetDeviceIP(d DeviceInfo) string {
 	if dev, ok := d.(Device); ok {
@@ -123,9 +127,7 @@ func (d Device) GetUPTimeSNMP(community string, timeout int) (string, error) {
 	return result, nil
 }
 
-
-func newDevice(cfg config.DeviceConfig, credential config.CredentialInfo) (Device, error) {
-
+func NewDevice(cfg config.DeviceConfig, credential config.CredentialInfo) (Device, error) {
 
 	return Device{
 		IP:       cfg.IP,
@@ -135,4 +137,3 @@ func newDevice(cfg config.DeviceConfig, credential config.CredentialInfo) (Devic
 		Vendor:   cfg.Vendor,
 	}, nil
 }
-
