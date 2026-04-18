@@ -2,6 +2,7 @@ package device
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sync"
 
@@ -91,14 +92,21 @@ func CheckDeviceFull(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync
 			target = extractHostname(device.Type(), output)
 		}
 
-		filePath, err := backup.WriteToFile(target, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
+		filePathAddress, err := backup.WriteToFile(target, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
 		if err != nil {
 			logger.Error("device %s: failed to write backup: %v", device.IP, err)
 			report.Error = fmt.Errorf("device %s: failed to write backup: %w", device.IP, err)
 			reports <- report
 			return
 		}
-		report.BackupPath = filePath
+
+		if cfg.Backup.ArchivePath != "" {
+			report.BackupPath = filepath.Join(cfg.Backup.ArchivePath, device.Type(), filepath.Base(filePathAddress))
+		} else {
+
+			report.BackupPath = filePathAddress
+		}
+
 	}
 	reports <- report
 
