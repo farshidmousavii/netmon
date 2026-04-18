@@ -10,8 +10,19 @@ import (
 func sshToDevice(ip, port, username, password string) (*ssh.Client, error) {
 	serverAddress := ip + ":" + port
 	config := &ssh.ClientConfig{
-		User:            username,
-		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		User: username,
+		Auth: []ssh.AuthMethod{
+			ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
+				//for each question return password
+				answers := make([]string, len(questions))
+				for i := range questions {
+					answers[i] = password
+				}
+				return answers, nil
+			}),
+			//regular method
+			ssh.Password(password),
+		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         time.Second * 5,
 		Config: ssh.Config{
