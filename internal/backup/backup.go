@@ -36,7 +36,7 @@ func WriteToFile(hostname, deviceType, output, backupDirectory, archivePath stri
 	}
 
 	if archivePath != "" {
-		if err := moveFile(filePath, archivePath); err != nil {
+		if err := moveFile(filePath, archivePath, deviceType); err != nil {
 			return "", fmt.Errorf("move to archive: %w", err)
 		}
 	}
@@ -92,7 +92,7 @@ func atomicWrite(dst string, data []byte) error {
 	return nil
 }
 
-func moveFile(src, destDir string) error {
+func moveFile(src, destDir, deviceType string) error {
 	info, err := os.Stat(destDir)
 	if err != nil {
 		return fmt.Errorf("stat destination dir: %w", err)
@@ -103,7 +103,7 @@ func moveFile(src, destDir string) error {
 	}
 
 	now := time.Now().Format("2006-01-02_15-04")
-	dirName := filepath.Join(destDir, now)
+	dirName := filepath.Join(destDir, now, deviceType)
 
 	if err = os.MkdirAll(dirName, 0755); err != nil {
 		return fmt.Errorf("create archive directory: %w", err)
