@@ -97,23 +97,44 @@ func moveFile(src, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("stat destination dir: %w", err)
 	}
+
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not directory", destDir)
 	}
 
-	dst := filepath.Join(destDir, filepath.Base(src))
+	now := time.Now().Format("2006-01-02_15-04")
+	dirName := filepath.Join(destDir, now)
 
-	// try rename first (fast path)
+	if err = os.MkdirAll(dirName, 0755); err != nil {
+		return fmt.Errorf("create archive directory: %w", err)
+	}
+
+	dst := filepath.Join(dirName, filepath.Base(src))
+
+	// Try rename first (fast path)
 	if err := os.Rename(src, dst); err == nil {
+		// check folder is empty ?
+		cleanupEmptyDir(filepath.Dir(src))
 		return nil
 	}
 
-	// fallback to copy + remove
-	return copyAndRemove(src, dst)
+	// Fallback to copy + remove
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+
+	// remove file
+	if err := os.Remove(src); err != nil {
+		return fmt.Errorf("remove source file: %w", err)
+	}
+
+	// check folder is empty ?
+	cleanupEmptyDir(filepath.Dir(src))
+
+	return nil
 }
 
-func copyAndRemove(src, dst string) error {
-	// prevent overwrite
+func copyFile(src, dst string) error {
 	if _, err := os.Stat(dst); err == nil {
 		return fmt.Errorf("destination file already exists: %s", dst)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -124,35 +145,40 @@ func copyAndRemove(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}
-	defer srcFile.Close()
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(dst), "tmp-*")
+	dstFile, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("create temp destination: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := io.Copy(tmpFile, srcFile); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("copy data: %w", err)
+		srcFile.Close()
+		return fmt.Errorf("create destination: %w", err)
 	}
 
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("sync destination: %w", err)
-	}
+	_, copyErr := io.Copy(dstFile, srcFile)
 
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close destination: %w", err)
-	}
+	srcFile.Close()
+	dstFile.Close()
 
-	if err := os.Rename(tmpFile.Name(), dst); err != nil {
-		return fmt.Errorf("final rename: %w", err)
-	}
-
-	if err := os.Remove(src); err != nil {
-		return fmt.Errorf("remove source: %w", err)
+	if copyErr != nil {
+		os.Remove(dst)
+		return fmt.Errorf("copy data: %w", copyErr)
 	}
 
 	return nil
+}
+
+func cleanupEmptyDir(dir string) {
+	//check is empty ?
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		logger.Warning("Failed to read directory %s: %v", dir, err)
+		return
+	}
+
+	// if folder is empty , remove it
+	if len(entries) == 0 {
+		if err := os.Remove(dir); err != nil {
+			logger.Warning("Failed to remove empty directory %s: %v", dir, err)
+		} else {
+			logger.Info("Removed empty backup directory: %s", dir)
+		}
+	}
 }
