@@ -3,6 +3,7 @@ package device
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/farshidmousavii/netmon/internal/config"
 	"github.com/farshidmousavii/netmon/internal/snmp"
@@ -69,7 +70,7 @@ func (d Device) ShowCommand() (string, error) {
 	}
 	switch d.Type() {
 	case "cisco":
-		ciscooutput, cmErr = runCisco(session, ciscoCommands)
+		ciscooutput, cmErr = executeCiscoShell(session, ciscoCommands)
 
 	case "mikrotik":
 		cmd = "export compact"
@@ -136,4 +137,13 @@ func NewDevice(cfg config.DeviceConfig, credential config.CredentialInfo) (Devic
 		Password: credential.Password,
 		Vendor:   cfg.Vendor,
 	}, nil
+}
+
+// SaveConfig - for save config in cisco
+func (d Device) SaveConfig() (string, error) {
+	if !strings.EqualFold(d.Vendor, "cisco") {
+		return "", fmt.Errorf("save config only supported for Cisco devices")
+	}
+
+	return d.RunCommand("write memory")
 }

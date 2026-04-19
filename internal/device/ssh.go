@@ -1,7 +1,6 @@
 package device
 
 import (
-	"io"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -49,39 +48,4 @@ func sshToDevice(ip, port, username, password string) (*ssh.Client, error) {
 
 	return conn, err
 
-}
-
-func runCisco(session *ssh.Session, enableSecret string) (string, error) {
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-	if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
-		return "", err
-	}
-	stdin, err := session.StdinPipe()
-	if err != nil {
-		return "", err
-	}
-	stdout, err := session.StdoutPipe()
-	if err != nil {
-		return "", err
-	}
-	if err := session.Shell(); err != nil {
-		return "", err
-	}
-	commands := []string{
-		"enable",
-		enableSecret,
-		"terminal length 0",
-		"show running-config",
-		"exit",
-	}
-	for _, cmd := range commands {
-		stdin.Write([]byte(cmd + "\n"))
-		time.Sleep(1 * time.Second)
-	}
-	output, _ := io.ReadAll(stdout)
-	return string(output), nil
 }

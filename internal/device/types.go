@@ -14,3 +14,10 @@ type DeviceInfo interface {
 	Type() string
 	ShowCommand() (string, error)
 }
+
+type ExecResult struct {
+	DeviceName string
+	DeviceIP   string
+	Output     string
+	Error      error
+}
