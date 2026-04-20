@@ -37,7 +37,7 @@ func Execute() {
 
 func init() {
 
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to config file")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to config file(config.yaml or devices.csv)")
 
 	rootCmd.Flags().BoolVarP(&logToFile, "log", "l", false, "enable file logging")
 	rootCmd.Flags().BoolVar(&skipBackup, "skip-backup", false, "skip backup")

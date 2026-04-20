@@ -3,56 +3,83 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
 
-
-
-func LoadConfig(fileName string) (*Config, error) {
-
-	cfg := Config{}
-
-	file, err := os.ReadFile(fileName)
-	if err != nil {
-		return &cfg, fmt.Errorf("can not load config file : %w", err)
+// LoadConfig - Auto detect CSV or Yaml
+func LoadConfig(path string) (*Config, error) {
+	// check if file exist
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("config file not found: %s", path)
 	}
 
-	err = yaml.Unmarshal(file, &cfg)
+	// detect file extention
+	ext := strings.ToLower(filepath.Ext(path))
 
-	if err != nil {
-		return &cfg, fmt.Errorf("Can not unmarshall : %w", err)
+	switch ext {
+	case ".yaml", ".yml":
+		return loadFromYAML(path)
+	case ".csv":
+		return loadFromCSV(path)
+	default:
+		return nil, fmt.Errorf("unsupported config format: %s (use .yaml or .csv)", ext)
 	}
-	expandEnvVars(&cfg)
+}
+
+// loadFromYAML
+func loadFromYAML(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read YAML file: %w", err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse YAML: %w", err)
+	}
+
+	// Validation
+	if len(cfg.Devices) == 0 {
+		return nil, fmt.Errorf("no devices configured in YAML")
+	}
+
+	if len(cfg.Credentials) == 0 {
+		return nil, fmt.Errorf("no credentials configured in YAML")
+	}
+
 	return &cfg, nil
-
 }
 
-func LoadEnvVars() error {
-	if err := godotenv.Load(".env"); err != nil {
-		return fmt.Errorf("load .env file: %w", err)
-	}
-	return nil
-}
-
-func expandEnvVars(cfg *Config) {
-	// credentials
-	for name, cred := range cfg.Credentials {
-		cred.Username = os.ExpandEnv(cred.Username)
-		cred.Password = os.ExpandEnv(cred.Password)
-		cfg.Credentials[name] = cred
+func loadFromCSV(path string) (*Config, error) {
+	devices, credentials, err := parseCSV(path)
+	if err != nil {
+		return nil, err
 	}
 
-	// snmp
-	cfg.SNMP.Community = os.ExpandEnv(cfg.SNMP.Community)
-}
+	// create config from csv data
+	cfg := &Config{
+		Devices:     devices,
+		Credentials: credentials,
+		SNMP: &SNMPConfig{
+			Community: "public", // default
+			Timeout:   10,
+		},
+		Backup: BackupConfig{
+			Directory:   "backups",
+			ArchivePath: "",
+		},
+	}
 
+	return cfg, nil
+}
 
 func (c *Config) GetCredential(name string) (CredentialInfo, error) {
-    cred, ok := c.Credentials[name]
-    if !ok {
-        return CredentialInfo{}, fmt.Errorf("credential '%s' not found", name)
-    }
-    return cred, nil
+	cred, ok := c.Credentials[name]
+	if !ok {
+		return CredentialInfo{}, fmt.Errorf("credential '%s' not found", name)
+	}
+	return cred, nil
 }

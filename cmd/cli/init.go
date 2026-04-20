@@ -3,76 +3,95 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
+var initFormat string
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize config files",
-	Run: func(cmd *cobra.Command, args []string) {
-		runInit()
-	},
+	Run:   runInit,
 }
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().StringVar(&initFormat, "format", "yaml", "config format (yaml/csv)")
 }
 
-func runInit() {
-	// Check if files exist
+func runInit(cmd *cobra.Command, args []string) {
+	switch strings.ToLower(initFormat) {
+	case "yaml", "yml":
+		createYAMLConfig()
+	case "csv":
+		createCSVConfig()
+	default:
+		fmt.Printf("Unsupported format: %s (use yaml or csv)\n", initFormat)
+		os.Exit(1)
+	}
+}
+
+func createYAMLConfig() {
 	if _, err := os.Stat("config.yaml"); err == nil {
 		fmt.Println("⚠ config.yaml already exists")
-	} else {
-		configContent := `version: 1
+		return
+	}
+
+	configContent := `version: 1
 
 credentials:
   cisco:
     username: admin
-    password: ${CISCO_PASSWORD}
+    password: changeme
   
   mikrotik:
     username: admin
-    password: ${MIKROTIK_PASSWORD}
+    password: changeme
 
 devices:
-  - name: my-device
+  - name: core-switch
     ip: 192.168.1.1
     port: 22
     vendor: cisco
     credential: cisco
 
 snmp:
-  community: ${SNMP_COMMUNITY}
+  community: public
   timeout: 10
 
 backup:
   directory: backups
   archive_path: ""
 `
-		if err := os.WriteFile("config.yaml", []byte(configContent), 0644); err != nil {
-			fmt.Printf("Failed to create config.yaml: %v\n", err)
-		} else {
-			fmt.Println("config.yaml created")
-		}
-	}
-
-	if _, err := os.Stat(".env"); err == nil {
-		fmt.Println(".env already exists")
+	if err := os.WriteFile("config.yaml", []byte(configContent), 0644); err != nil {
+		fmt.Printf("✗ Failed to create config.yaml: %v\n", err)
 	} else {
-		envContent := `CISCO_PASSWORD=changeme
-MIKROTIK_PASSWORD=changeme
-SNMP_COMMUNITY=public
-`
-		if err := os.WriteFile(".env", []byte(envContent), 0600); err != nil {
-			fmt.Printf("Failed to create .env: %v\n", err)
-		} else {
-			fmt.Println(".env created")
-		}
+		fmt.Println("✓ config.yaml created")
+		fmt.Println("\nNext steps:")
+		fmt.Println("  1. Edit config.yaml with your credentials")
+		fmt.Println("  2. Run: netmon-cli monitor")
+	}
+}
+
+func createCSVConfig() {
+	if _, err := os.Stat("devices.csv"); err == nil {
+		fmt.Println("⚠ devices.csv already exists")
+		return
 	}
 
-	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Edit config.yaml with your devices")
-	fmt.Println("  2. Edit .env with your credentials")
-	fmt.Println("  3. Run: netmon-cli")
+	csvContent := `name,ip,port,vendor,username,password
+core-switch,192.168.1.1,22,cisco,admin,changeme
+dist-switch,192.168.2.1,22,cisco,admin,changeme
+edge-router,192.168.3.1,22,mikrotik,admin,changeme
+`
+	if err := os.WriteFile("devices.csv", []byte(csvContent), 0644); err != nil {
+		fmt.Printf("✗ Failed to create devices.csv: %v\n", err)
+	} else {
+		fmt.Println("✓ devices.csv created")
+		fmt.Println("\nNext steps:")
+		fmt.Println("  1. Edit devices.csv with your devices")
+		fmt.Println("  2. Run: netmon-cli monitor --config devices.csv")
+	}
 }
