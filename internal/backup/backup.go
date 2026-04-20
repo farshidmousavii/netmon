@@ -279,8 +279,6 @@ func normalizeCiscoOutput(output, deviceType string) string {
 
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
-		fmt.Println("LINE:", line)
-		fmt.Println("START:", start)
 		// start of config
 		if strings.HasPrefix(trim, "version") ||
 			strings.HasPrefix(trim, "!") ||
@@ -303,7 +301,6 @@ func normalizeCiscoOutput(output, deviceType string) string {
 
 		result = append(result, line)
 	}
-	fmt.Println("RESULT LEN:", len(result))
 	return strings.Join(result, "\n")
 }
 
