@@ -1,103 +1,83 @@
-# Network Device Monitor
+# NetMon
 
-A CLI tool for monitoring and backing up network devices (Cisco & Mikrotik).
+NetMon is a powerful CLI tool for network device monitoring, configuration backup, and bulk command execution across Cisco and MikroTik devices.
 
-## Features
+---
 
-- ✅ Concurrent device monitoring with goroutines
-- ✅ SSH-based configuration backup
-- ✅ SNMP information gathering (hostname, uptime, vendor)
-- ✅ Atomic backup with timestamped directories
-- ✅ Structured logging (console + file)
-- ✅ YAML configuration with environment variables
-- ✅ JSON output support
-- ✅ Configuration diff tool
-- ✅ Easy setup with `init` command
-- ✅ Flexible command-line interface
+# Features
 
-## Limitations
+- Health Monitoring — Ping + SNMP queries (vendor, hostname, uptime)
+- Configuration Backup — Automated backup with archiving support
+- Bulk Command Execution — Run commands across multiple devices
+- Config Comparison — Line-by-line diff between backup files
+- Flexible Configuration — YAML or CSV format with auto-detection
+- Concurrent Operations — Fast parallel execution across devices
+- Multiple Output Formats — Human-readable or JSON output
 
-- Currently supports only Cisco and Mikrotik devices
-- Requires SSH access with password authentication (key-based auth not supported yet)
-- SNMP must be enabled on devices (optional but recommended)
-- Sequential backup per device (no batch operations)
-- No GUI or web interface
+## Supported Devices
+
+- Cisco — IOS, IOS-XE, NX-OS
+- MikroTik — RouterOS
+
+---
 
 ## Installation
 
-### Option 1: Build from Source
+Build from Source
+
 ```bash
 git clone https://github.com/farshidmousavii/netmon.git
 cd netmon
 go build -o netmon-cli ./cmd/netmon
 ```
 
-### Option 2: Download Binary (Coming Soon)
+Run Directly
 
-Pre-built binaries will be available in [Releases](https://github.com/farshidmousavii/netmon/releases).
+```bash
+go run ./cmd/netmon [command]
+```
 
 ## Quick Start
+
+1. Initialize Configuration
+   YAML format (recommended for shared credentials):
+
 ```bash
-# 1. Initialize config files
-./netmon-cli init
-
-# 2. Edit config.yaml with your devices
-nano config.yaml
-
-# 3. Edit .env with your credentials
-nano .env
-
-# 4. Run monitoring
-./netmon-cli
-```
-
-## Configuration
-
-### Automatic Setup
-```bash
+# Creates config.yaml
 ./netmon-cli init
 ```
 
-This creates:
-- `config.yaml` - Device configuration template
-- `.env` - Credentials template
+CSV format (recommended for bulk import):
 
-### Manual Setup
-
-1. Copy example files:
 ```bash
-cp configs/config.example.yaml config.yaml
-cp .env.example .env
+./netmon-cli init --format csv
 ```
 
-2. Edit `config.yaml`:
+2. Edit Configuration
+
+YAML (`config.yaml`):
+
 ```yaml
 version: 1
 
 credentials:
   cisco:
     username: admin
-    password: ${CISCO_PASSWORD}
-  
+    password: cisco123
+
   mikrotik:
     username: admin
-    password: ${MIKROTIK_PASSWORD}
+    password: mikrotik123
 
 devices:
   - name: core-switch
-    ip: 192.168.2.1
+    ip: 192.168.1.1
     port: 22
     vendor: cisco
     credential: cisco
 
-  - name: edge-router
-    ip: 192.168.2.2
-    port: 22
-    vendor: mikrotik
-    credential: mikrotik
-
 snmp:
-  community: ${SNMP_COMMUNITY}
+  community: public
   timeout: 10
 
 backup:
@@ -105,86 +85,407 @@ backup:
   archive_path: ""
 ```
 
-3. Edit `.env`:
-```env
-CISCO_PASSWORD=yourpassword
-MIKROTIK_PASSWORD=yourpassword
-SNMP_COMMUNITY=public
+CSV (`devices.csv`):
+
+```csv
+#snmp_community=<value> — SNMP community string (default: public)
+#snmp_timeout=<seconds> — SNMP timeout (default: 10)
+#backup_dir=<path> — Backup directory (default: backups)
+#backup_archive=<path> — Archive path for old backups
+name,ip,port,vendor,username,password
+core-switch,192.168.1.1,22,cisco,admin,cisco123
+dist-switch-01,192.168.2.1,22,cisco,admin,cisco123
+access-sw-01,192.168.3.1,22,cisco,admin,cisco123
+edge-router,192.168.4.1,22,mikrotik,admin,mikrotik123
 ```
 
-## Usage
+```
+CSV Settings (optional):
+#snmp_community=<value> — SNMP community string (default: public)
+#snmp_timeout=<seconds> — SNMP timeout (default: 10)
+#backup_dir=<path> — Backup directory (default: backups)
+#backup_archive=<path> — Archive path for old backups
 
-### Commands
-```bash
-# Show help
-./netmon-cli --help
+```
 
-# Initialize config files
-./netmon-cli init
+3. Run Commands
 
-# Run monitoring (default command)
-./netmon-cli
+```bash#
+Monitor with YAML
 ./netmon-cli monitor
 
-# Compare backup files
-./netmon-cli diff <file1> <file2>
+# Monitor with CSV
+./netmon-cli monitor --config devices.csv
+
+# Backup only
+./netmon-cli backup
+
+# Execute bulk commands
+./netmon-cli exec --type cisco -c "show version"
 ```
 
-### Monitoring Examples
+# Commands
+
+## monitor
+
+Health check devices with ping and SNMP.
+
 ```bash
-# Basic run with console output
-./netmon-cli
+# Basic monitoring
+./netmon-cli monitor
 
-# Enable file logging
-./netmon-cli -l
-
-# Skip backup (health check only)
-./netmon-cli --skip-backup
+# Skip backup during monitoring
+./netmon-cli monitor --skip-backup
 
 # Skip SNMP queries
-./netmon-cli --skip-snmp
+./netmon-cli monitor --skip-snmp
 
-# Output as JSON
-./netmon-cli --json
+# JSON output
+./netmon-cli monitor --json
 
-# Custom config file
-./netmon-cli --config /path/to/config.yaml
+# Enable file logging
+./netmon-cli monitor --log
 
-# Combine flags
-./netmon-cli -l --skip-backup --json
+# Override SNMP settings
+./netmon-cli monitor --snmp-community private --snmp-timeout 20
+
+# Override backup directory
+./netmon-cli monitor --backup-dir /opt/backups
+
+
+Options:
+
+-l, --log — Enable file logging
+--skip-backup — Skip configuration backup
+--skip-snmp — Skip SNMP queries
+-j, --json — Output as JSON
+--snmp-community <string> — Override SNMP community
+--snmp-timeout <int> — Override SNMP timeout (seconds)
+--backup-dir <path> — Override backup directory
+--backup-archive <path> — Override archive path
 ```
 
-### Diff Examples
+# backup
 
-Compare two backup files to see what changed:
+Backup device configurations.
+
 ```bash
-./netmon-cli diff backups/cisco/2025-03-05_14-30-00/Core-SW-01.txt \
-                  backups/cisco/2025-03-06_14-30-00/Core-SW-01.txt
+# Basic backup
+./netmon-cli backup
+
+# With logging
+./netmon-cli backup --log
+
+# JSON output
+./netmon-cli backup --json
 ```
 
-### Available Flags
+**Options:**
 
-| Command | Flag | Short | Description |
-|---------|------|-------|-------------|
-| Global | `--config` | | Path to config file (default: config.yaml) |
-| monitor | `--log` | `-l` | Enable file logging |
-| monitor | `--skip-backup` | | Skip backup, only health check |
-| monitor | `--skip-snmp` | | Skip SNMP queries |
-| monitor | `--json` | `-j` | Output report as JSON |
+- `-l, --log` — Enable file logging
+- `-j, --json` — Output as JSON
 
-## Output
+**Backup File Naming:**
 
-### Console Report
 ```
-═══════════════════════════════════════════════════════════
-           NETWORK DEVICE MONITORING REPORT
-═══════════════════════════════════════════════════════════
-Started:       2025-03-05 14:30:00
-Total Devices: 2
+backups/
+├── cisco/
+│   └── 2026-04-20_11-30/
+│       ├── Core-Switch.txt
+│       └── Dist-Switch-01.txt
+└── mikrotik/
+    └── 2026-04-20_11-30/
+        └── Edge-Router.txt
+```
 
-──────────────────────────────────────────────────────────
-Device #1: core-switch (192.168.2.1)
-──────────────────────────────────────────────────────────
+# exec
+
+Execute commands on devices.
+
+```bash
+# Single device - show command
+./netmon-cli exec -d core-switch -c "show ip interface brief"
+
+# All Cisco devices - config command
+./netmon-cli exec --type cisco -c "interface gi0/1" -c "description UPLINK"
+
+# With config save (Cisco only)
+./netmon-cli exec -d core-switch -c "interface gi0/1" -c "shutdown" --save
+
+# Dry run (preview without execution)
+./netmon-cli exec --type cisco -c "interface gi0/1" -c "shutdown" --dry-run
+
+# Save output to file
+./netmon-cli exec --type cisco -c "show running-config" -o output.txt
+
+# Interactive mode
+./netmon-cli exec --type cisco
+# Enter commands one per line, empty line to finish
+Target Selection (choose one):
+
+-d, --device <name|ip> — Execute on specific device
+--type <vendor> — Execute on all devices of type (cisco/mikrotik)
+```
+
+## Command Options:
+
+```
+-c, --command <cmd> — Command to execute (repeatable for multiple commands)
+--save — Save config after execution (Cisco: write memory)
+--dry-run — Preview commands without execution
+-o, --output <file> — Save output to file (.txt or .log)
+```
+
+## Command Auto-Detection:
+
+Commands starting with show, display, ping, traceroute → Exec mode
+
+All other commands → Config mode (automatic conf t → commands → end)
+
+## Examples:
+
+```bash
+# Show command (auto-detected)
+./netmon-cli exec -d core-switch -c "show ip route"
+
+# Config commands (auto-detected, enters config mode)
+./netmon-cli exec --type cisco \
+  -c "interface gi0/1" \
+  -c "description UPLINK_TO_CORE" \
+  -c "no shutdown" \
+  --save
+
+# Dry run to preview
+./netmon-cli exec --type cisco \
+  -c "interface gi0/1" \
+  -c "shutdown" \
+  --dry-run
+
+# Execute and save output
+./netmon-cli exec --type cisco -c "show run" -o configs.txt
+```
+
+# diff
+
+Compare two backup files.
+
+```bash
+./netmon-cli diff backups/cisco/2026-04-20_10-00/Core-Switch.txt \
+                   backups/cisco/2026-04-20_11-00/Core-Switch.txt
+```
+
+**Output:**
+
+```
+Found 3 differences:
+
+Line 42:
+  - interface GigabitEthernet0/1
+  + interface GigabitEthernet0/2
+
+Line 58:
+  - description OLD_LINK
+  + description NEW_UPLINK
+
+Line 120:
+  -  shutdown
+```
+
+# init
+
+Initialize configuration files.
+
+```bash
+# Create YAML config (default)
+./netmon-cli init
+
+# Create CSV config
+./netmon-cli init --format csv
+Options:
+
+--format <yaml|csv> — Config format (default: yaml)
+```
+
+## Global Flags
+
+These flags apply to all commands:
+
+```
+--config <file> — Path to config file (default: config.yaml)
+
+Auto-detection:
+
+.yaml, .yml → YAML format
+.csv → CSV format
+```
+
+## Examples:
+
+```bash
+./netmon-cli monitor --config devices.csv
+./netmon-cli backup --config /etc/netmon/config.yaml
+./netmon-cli exec --config production.csv --type cisco -c "show version"
+```
+
+## Configuration
+
+YAML Format
+Best for:
+
+- Shared credentials across devices
+- Complex SNMP/backup settings
+- Template-based device groups
+
+## Structure:
+
+```yaml
+version: 1
+
+credentials:
+  <credential-name>:
+    username: <username>
+    password: <password>
+
+devices:
+  - name: <device-name>
+    ip: <ip-address>
+    port: <ssh-port>
+    vendor: <cisco|mikrotik>
+    credential: <credential-name>
+
+snmp:
+  community: <community-string>
+  timeout: <timeout-seconds>
+
+backup:
+  directory: <backup-path>
+  archive_path: <archive-path>
+```
+
+## CSV Format
+
+Best for:
+
+- Bulk device import
+- Per-device credentials
+- Quick setup from spreadsheets
+
+## Structure:
+
+```csv
+#snmp_community=<value>
+#snmp_timeout=<seconds>
+#backup_dir=<path>
+#backup_archive=<path>
+name,ip,port,vendor,username,password
+<name>,<ip>,<port>,<vendor>,<user>,<pass>
+Notes:
+
+Lines starting with #key=value define global settings
+If settings are omitted, defaults are used
+Each device has its own username/password
+
+Defaults:
+
+SNMP community: public
+SNMP timeout: 10 seconds
+Backup directory: backups
+Archive path: empty (no archiving)
+```
+
+# Examples
+
+## Monitoring
+
+```bash
+# Basic monitoring (YAML config)
+./netmon-cli monitor
+
+# Monitor with CSV, override SNMP settings
+./netmon-cli monitor --config devices.csv \
+  --snmp-community private \
+  --snmp-timeout 20
+
+# Monitor without SNMP
+./netmon-cli monitor --skip-snmp
+
+# Monitor with logging and JSON output
+./netmon-cli monitor --log --json > report.json
+```
+
+## Backup
+
+```bash
+# Backup all devices
+./netmon-cli backup
+
+# Backup with custom directory
+./netmon-cli monitor --backup-dir /mnt/backups
+
+# Backup with archiving
+./netmon-cli monitor --backup-archive /mnt/archive
+```
+
+## Bulk Execution
+
+```bash
+# Check version on all Cisco devices
+./netmon-cli exec --type cisco -c "show version"
+
+# Configure interface on specific device
+./netmon-cli exec -d core-switch \
+  -c "interface gi0/1" \
+  -c "description UPLINK_TO_DATACENTER" \
+  -c "no shutdown" \
+  --save
+
+# Dry run before execution
+./netmon-cli exec --type cisco \
+  -c "no ip http server" \
+  -c "no ip http secure-server" \
+  --dry-run
+
+# Interactive mode
+./netmon-cli exec --type cisco
+Enter commands (one per line, empty line to finish):
+interface gi0/1
+description MGMT_INTERFACE
+no shutdown
+[Enter]
+
+⚠ You are about to execute on 5 devices:
+  • core-switch (192.168.1.1)
+  • dist-switch-01 (192.168.2.1)
+  ...
+Continue? (yes/no): yes
+```
+
+# Comparison
+
+Compare two backup files
+
+```bash
+./netmon-cli diff \
+  backups/cisco/2026-04-19_23-00/Core-Switch.txt \
+  backups/cisco/2026-04-20_11-00/Core-Switch.txt
+```
+
+---
+
+## Output Examples
+
+### Monitor Output
+
+```
+══════════════════════════════════════════════════════════════════════
+           NETWORK DEVICE HEALTH CHECK
+══════════════════════════════════════════════════════════════════════
+Started:       2026-04-20 11:30:00
+Total Devices: 3
+
+──────────────────────────────────────────────────────────────────────
+Device #1: core-switch (192.168.1.1)
+──────────────────────────────────────────────────────────────────────
 Type:     cisco
 Status:   ✓ Online
 Ping:     2ms
@@ -194,152 +495,115 @@ SNMP Info:
   Vendor:   cisco
   Uptime:   45 days, 12:34:56
 
-Backup:
-  ✓ Saved to: backups/cisco/2025-03-05_14-30-00/Core-SW-01.txt
-
-──────────────────────────────────────────────────────────
-Device #2: edge-router (192.168.2.2)
-──────────────────────────────────────────────────────────
-Type:     mikrotik
-Status:   ✓ Online
-Ping:     1ms
-
-SNMP Info:
-  Hostname: Edge-Router-01
-  Vendor:   mikrotik
-  Uptime:   12 days, 08:15:30
-
-Backup:
-  ✓ Saved to: backups/mikrotik/2025-03-05_14-30-00/Edge-Router-01.rsc
-
-═══════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════
 Summary:
-  Total:   2 devices
-  Online:  2 devices
+  Total:   3 devices
+  Online:  3 devices
   Failed:  0 devices
-═══════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════
 ```
 
-### JSON Output
-```bash
-./netmon-cli --json
+---
+
+### Backup Output
+
+```
+══════════════════════════════════════════════════════════════════════
+           DEVICE CONFIGURATION BACKUP
+══════════════════════════════════════════════════════════════════════
+Started:       2026-04-20 11:30:00
+Total Devices: 3
+
+──────────────────────────────────────────────────────────────────────
+Device #1: core-switch (192.168.1.1)
+──────────────────────────────────────────────────────────────────────
+Type:     cisco
+Status:   ✓ Success
+Saved to: backups/cisco/2026-04-20_11-30/Core-Switch.txt
+
+══════════════════════════════════════════════════════════════════════
+Summary:
+  Total:     3 devices
+  Success:   3 backups
+  Failed:    0 devices
+══════════════════════════════════════════════════════════════════════
 ```
 
-Generates a timestamped JSON report in `reports/` directory:
-```json
-[
-  {
-    "Name": "core-switch",
-    "IP": "192.168.2.1",
-    "Type": "cisco",
-    "Online": true,
-    "PingTime": "2ms",
-    "SNMPInfo": {
-      "Hostname": "Core-SW-01",
-      "Vendor": "cisco",
-      "Uptime": "45 days, 12:34:56"
-    },
-    "BackupPath": "backups/cisco/2025-03-05_14-30-00/Core-SW-01.txt",
-    "Error": null
-  }
-]
+---
+
+### Exec Output
+
+```
+══════════════════════════════════════════════════════════════════════
+Device #1: core-switch (192.168.1.1)
+══════════════════════════════════════════════════════════════════════
+Status: ✓ Success
+──────────────────────────────────────────────────────────────────────
+Cisco IOS Software, Version 15.2(4)E7
+...
+
+Building configuration...
+[OK]
+══════════════════════════════════════════════════════════════════════
+Summary:
+  Total:   3 devices
+  Success: 3 devices
+  Failed:  0 devices
+══════════════════════════════════════════════════════════════════════
 ```
 
-### Diff Output
-```
-Found 3 differences:
-
-Line 15:
-  - hostname OLD-NAME
-  + hostname NEW-NAME
-
-Line 42:
-  - ip address 192.168.1.1 255.255.255.0
-  + ip address 192.168.2.1 255.255.255.0
-
-Line 89:
-  - ntp server 10.0.0.1
-  + ntp server 10.0.0.2
-```
-
-## Requirements
-
-- Go 1.21+
-- SSH access to devices
-- SNMP enabled (optional)
+---
 
 ## Project Structure
+
 ```
-netmon/
+.
 ├── cmd/
-│   ├── cli/                # CLI commands & subcommands (Cobra)
-│   │   ├── root.go         # Root command & global flags
-│   │   ├── monitor.go      # Monitoring command
-│   │   ├── diff.go         # Config diff command
-│   │   └── init.go         # Initialize config files
+│   ├── cli/                # CLI commands
+│   │   ├── root.go        # Root command & global flags
+│   │   ├── monitor.go     # Health check command
+│   │   ├── backup.go      # Backup command
+│   │   ├── exec.go        # Bulk execution command
+│   │   ├── diff.go        # Config comparison command
+│   │   └── init.go        # Config initialization
 │   └── netmon/
-│       └── main.go         # Entry point
+│       └── main.go        # Entry point
 ├── internal/
 │   ├── backup/
-│   │   ├── backup.go       # Backup logic with atomic writes
-│   │   └── diff.go         # File comparison
+│   │   ├── backup.go      # Backup logic & archiving
+│   │   └── diff.go        # File comparison
 │   ├── config/
-│   │   ├── config.go       # YAML config loader
-│   │   └── types.go        # Config structs
+│   │   ├── config.go      # Config loader (YAML/CSV auto-detect)
+│   │   ├── csv.go         # CSV parser with settings
+│   │   └── types.go       # Config structures
 │   ├── device/
-│   │   ├── check.go        # Device health check
-│   │   ├── device.go       # Device operations
-│   │   ├── ping.go         # Ping implementation
-│   │   ├── ssh.go          # SSH connection & commands
-│   │   └── types.go        # Device structs
+│   │   ├── check.go       # Health check (ping + SNMP)
+│   │   ├── device.go      # Device methods
+│   │   ├── exec.go        # Command execution
+│   │   ├── ping.go        # ICMP ping
+│   │   ├── ssh.go         # SSH connection & helpers
+│   │   └── types.go       # Device structures
 │   ├── logger/
-│   │   └── logger.go       # Structured logging
+│   │   └── logger.go      # Logging (console + file)
 │   ├── report/
-│   │   ├── report.go       # Console report formatting
-│   │   ├── json.go         # JSON report generation
-│   │   └── type.go         # Report structs
+│   │   ├── report.go      # Report printing (monitor/backup)
+│   │   ├── json.go        # JSON output
+│   │   └── type.go        # Report structures
 │   └── snmp/
-│       ├── snmp.go         # SNMP operations
-│       └── types.go        # SNMP structs
-├── configs/
-│   └── config.example.yaml # Example configuration
-├── .env.example            # Example credentials
-├── .gitignore
+│       ├── snmp.go        # SNMP queries
+│       └── types.go       # SNMP structures
+├── config.yaml            # YAML config (gitignored)
+├── devices.csv            # CSV config (gitignored)
 ├── go.mod
 ├── go.sum
 ├── LICENSE
 └── README.md
+
 ```
 
-**Runtime directories (created automatically):**
-```
-├── backups/                # Device configuration backups
-├── reports/                # JSON reports
-└── logs/                   # Log files (when using -l flag)
-```
-
-## Development
-```bash
-# Run without building
-go run ./cmd/netmon
-
-# Build
-go build -o netmon-cli ./cmd/netmon
-
-# Run tests (if available)
-go test ./...
-
-# Format code
-go fmt ./...
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-MIT
+---
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+Built with ❤️ using Go
