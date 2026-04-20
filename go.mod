@@ -5,7 +5,6 @@ go 1.25.7
 require (
 	github.com/fatih/color v1.18.0
 	github.com/gosnmp/gosnmp v1.43.2
-	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.48.0
 	gopkg.in/yaml.v3 v3.0.1

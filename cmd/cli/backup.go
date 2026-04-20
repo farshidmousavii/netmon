@@ -30,10 +30,6 @@ func runBackup(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	if err := config.LoadEnvVars(); err != nil {
-		logger.Warning("failed to load .env: %v", err)
-	}
-
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
