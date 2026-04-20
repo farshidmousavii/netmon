@@ -205,6 +205,8 @@ Execute commands on devices.
 ```bash
 # Single device - show command
 ./netmon-cli exec -d core-switch -c "show ip interface brief"
+#or
+./netmon-cli exec -d 192.168.1.1 -c "show ip interface brief"
 
 # All Cisco devices - config command
 ./netmon-cli exec --type cisco -c "interface gi0/1" -c "description UPLINK"
