@@ -81,7 +81,11 @@ func createCSVConfig() {
 		return
 	}
 
-	csvContent := `name,ip,port,vendor,username,password
+	csvContent := `#snmp_community=public
+#snmp_timeout=10
+#backup_dir=backups
+#backup_archive=""
+name,ip,port,vendor,username,password
 core-switch,192.168.1.1,22,cisco,admin,changeme
 dist-switch,192.168.2.1,22,cisco,admin,changeme
 edge-router,192.168.3.1,22,mikrotik,admin,changeme

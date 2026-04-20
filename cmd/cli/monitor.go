@@ -11,6 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	overrideSNMPCommunity string
+	overrideSNMPTimeout   int
+	overrideBackupDir     string
+	overrideArchivePath   string
+)
+
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
 	Short: "Run network monitoring",
@@ -24,6 +31,11 @@ func init() {
 	monitorCmd.Flags().BoolVar(&skipBackup, "skip-backup", false, "skip backup")
 	monitorCmd.Flags().BoolVar(&skipSNMP, "skip-snmp", false, "skip SNMP")
 	monitorCmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "output as JSON")
+
+	monitorCmd.Flags().StringVar(&overrideSNMPCommunity, "snmp-community", "", "override SNMP community")
+	monitorCmd.Flags().IntVar(&overrideSNMPTimeout, "snmp-timeout", 0, "override SNMP timeout")
+	monitorCmd.Flags().StringVar(&overrideBackupDir, "backup-dir", "", "override backup directory")
+	monitorCmd.Flags().StringVar(&overrideArchivePath, "backup_archive", "", "override archive path")
 }
 
 func runMonitor(cmd *cobra.Command, args []string) {
@@ -34,6 +46,25 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Override from CLI flags
+	if overrideSNMPCommunity != "" {
+		if cfg.SNMP != nil {
+			cfg.SNMP.Community = overrideSNMPCommunity
+		}
+	}
+	if overrideSNMPTimeout > 0 {
+		if cfg.SNMP != nil {
+			cfg.SNMP.Timeout = overrideSNMPTimeout
+		}
+	}
+	if overrideBackupDir != "" {
+		cfg.Backup.Directory = overrideBackupDir
+	}
+
+	if overrideArchivePath != "" {
+		cfg.Backup.ArchivePath = overrideArchivePath
 	}
 
 	if skipSNMP {

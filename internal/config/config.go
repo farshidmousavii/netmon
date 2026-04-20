@@ -54,23 +54,16 @@ func loadFromYAML(path string) (*Config, error) {
 }
 
 func loadFromCSV(path string) (*Config, error) {
-	devices, credentials, err := parseCSV(path)
+	devices, credentials, snmpConfig, backupConfig, err := parseCSV(path)
 	if err != nil {
 		return nil, err
 	}
 
-	// create config from csv data
 	cfg := &Config{
 		Devices:     devices,
 		Credentials: credentials,
-		SNMP: &SNMPConfig{
-			Community: "public", // default
-			Timeout:   10,
-		},
-		Backup: BackupConfig{
-			Directory:   "backups",
-			ArchivePath: "",
-		},
+		SNMP:        snmpConfig,
+		Backup:      backupConfig,
 	}
 
 	return cfg, nil
