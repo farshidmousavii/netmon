@@ -3,9 +3,12 @@ backups/
 reports/
 logs/
 log/
+*.log
+*.txt
 
 # Config files
 config.yaml
+*.csv
 .env
 
 # Build outputs
