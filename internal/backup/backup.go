@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,7 +95,7 @@ func WriteToFile(hostname, deviceType, output, backupDirectory, archivePath stri
 
 	logger.Info("Start backup from %s", hostname)
 	// atomic write
-	if err := atomicWrite(filePath, []byte(output)); err != nil {
+	if err := atomicWrite(filePath, []byte(normalizeCiscoOutput(output, deviceType))); err != nil {
 		return "", fmt.Errorf("write config file: %w", err)
 	}
 
@@ -264,4 +265,50 @@ func extractHostname(deviceType, backupConfig string) string {
 	}
 
 	return ""
+}
+
+func normalizeCiscoOutput(output, deviceType string) string {
+	if deviceType != "cisco" {
+		return output
+	}
+	output = strings.ReplaceAll(output, "\r\n", "\n")
+	lines := strings.Split(output, "\n")
+
+	var result []string
+	start := false
+
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		fmt.Println("LINE:", line)
+		fmt.Println("START:", start)
+		// start of config
+		if strings.HasPrefix(trim, "version") ||
+			strings.HasPrefix(trim, "!") ||
+			strings.HasPrefix(trim, "interface") {
+			start = true
+		}
+
+		if !start {
+			continue
+		}
+
+		// remove prompt
+		if isCiscoPrompt(trim) {
+			continue
+		}
+
+		if trim == "" {
+			continue
+		}
+
+		result = append(result, line)
+	}
+	fmt.Println("RESULT LEN:", len(result))
+	return strings.Join(result, "\n")
+}
+
+var promptRegex = regexp.MustCompile(`^[a-zA-Z0-9\-_\.]+[>#]`)
+
+func isCiscoPrompt(line string) bool {
+	return promptRegex.MatchString(line)
 }
