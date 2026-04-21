@@ -2,7 +2,6 @@ package cli
 
 import (
 	"log"
-	"sync"
 
 	"github.com/farshidmousavii/netmon/internal/backup"
 	"github.com/farshidmousavii/netmon/internal/config"
@@ -26,6 +25,9 @@ func init() {
 }
 
 func runBackup(cmd *cobra.Command, args []string) {
+
+	ctx := cmd.Context()
+
 	if err := logger.Init(logToFile); err != nil {
 		log.Fatal(err)
 	}
@@ -35,23 +37,9 @@ func runBackup(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	reports := make(chan report.DeviceReport, len(cfg.Devices))
-	var wg sync.WaitGroup
-
 	logger.Info("Starting backup")
 
-	for _, deviceCfg := range cfg.Devices {
-		wg.Add(1)
-		go backup.BackupDevice(deviceCfg, cfg, &wg, reports)
-	}
-
-	wg.Wait()
-	close(reports)
-
-	var allReports []report.DeviceReport
-	for r := range reports {
-		allReports = append(allReports, r)
-	}
+	allReports := RunOnDevices(ctx, cfg, backup.BackupDevice, "backup")
 
 	if jsonOutput {
 		if err := report.ReportToJson(allReports); err != nil {

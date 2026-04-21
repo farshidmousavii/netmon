@@ -1,32 +1,27 @@
 package cli
 
 import (
+	"context"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	rootCmd = &cobra.Command{
-		Use:   "netmon",
-		Short: "Network Monitoring Tool",
-		Long: `Network Device Monitor - Monitor and backup Cisco/Mikrotik devices
-    
-Run without subcommand to start monitoring, or use:
-  netmon monitor   - Start monitoring
-  netmon diff      - Compare backup files
-  netmon init      - Initialize config files`,
-		Run: func(cmd *cobra.Command, args []string) {
-			monitorCmd.Run(cmd, args)
-		},
-	}
-
-	// Global flags
 	configPath string
 	logToFile  bool
 	skipBackup bool
 	skipSNMP   bool
 	jsonOutput bool
+)
+
+var (
+	rootCmd = &cobra.Command{
+		Use:   "netmon-cli",
+		Short: "Network device monitoring and management tool",
+		Long: `NetMon is a CLI tool for monitoring and managing network devices.
+It supports Cisco and MikroTik devices with features like health checks,
+configuration backups, and bulk command execution.`}
 )
 
 func Execute() {
@@ -39,8 +34,8 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to config file(config.yaml or devices.csv)")
 
-	rootCmd.Flags().BoolVarP(&logToFile, "log", "l", false, "enable file logging")
-	rootCmd.Flags().BoolVar(&skipBackup, "skip-backup", false, "skip backup")
-	rootCmd.Flags().BoolVar(&skipSNMP, "skip-snmp", false, "skip SNMP")
-	rootCmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "output as JSON")
+}
+
+func ExecuteContext(ctx context.Context) error {
+	return rootCmd.ExecuteContext(ctx)
 }

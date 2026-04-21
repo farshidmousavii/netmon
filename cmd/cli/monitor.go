@@ -1,8 +1,8 @@
 package cli
 
 import (
+	"context"
 	"log"
-	"sync"
 
 	"github.com/farshidmousavii/netmon/internal/config"
 	"github.com/farshidmousavii/netmon/internal/device"
@@ -39,6 +39,9 @@ func init() {
 }
 
 func runMonitor(cmd *cobra.Command, args []string) {
+
+	ctx := cmd.Context()
+
 	if err := logger.Init(logToFile); err != nil {
 		log.Fatal(err)
 	}
@@ -48,7 +51,25 @@ func runMonitor(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	// Override from CLI flags
+	applyMonitoroverrides(cfg)
+
+	allReports := RunOnDevices(ctx, cfg, func(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport) {
+		device.CheckDevice(ctx, deviceCfg, cfg, reports, skipBackup)
+	}, "network monitor")
+
+	if jsonOutput {
+		if err := report.ReportToJson(allReports); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		report.PrintMonitorReport(allReports)
+	}
+
+	logger.Info("Network monitor completed")
+}
+
+// Override from CLI flags
+func applyMonitoroverrides(cfg *config.Config) {
 	if overrideSNMPCommunity != "" {
 		if cfg.SNMP != nil {
 			cfg.SNMP.Community = overrideSNMPCommunity
@@ -70,32 +91,4 @@ func runMonitor(cmd *cobra.Command, args []string) {
 	if skipSNMP {
 		cfg.SNMP = nil
 	}
-
-	reports := make(chan report.DeviceReport, len(cfg.Devices))
-	var wg sync.WaitGroup
-
-	logger.Info("Starting network monitor")
-
-	for _, deviceCfg := range cfg.Devices {
-		wg.Add(1)
-		go device.CheckDevice(deviceCfg, cfg, &wg, reports, skipBackup)
-	}
-
-	wg.Wait()
-	close(reports)
-
-	var allReports []report.DeviceReport
-	for r := range reports {
-		allReports = append(allReports, r)
-	}
-
-	if jsonOutput {
-		if err := report.ReportToJson(allReports); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		report.PrintMonitorReport(allReports)
-	}
-
-	logger.Info("Network monitor completed")
 }

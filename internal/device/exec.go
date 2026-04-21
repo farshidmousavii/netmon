@@ -1,6 +1,7 @@
 package device
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -132,4 +133,32 @@ func isShowCommand(cmd string) bool {
 	}
 
 	return false
+}
+
+// wrapper with context
+func (d Device) RunCommandsWithContext(ctx context.Context, commands []string) (string, error) {
+	executor := NewContextExecutor(ctx, 60*time.Second)
+
+	var output string
+	err := executor.Execute(func() error {
+		var execErr error
+		output, execErr = d.RunCommands(commands)
+		return execErr
+	})
+
+	return output, err
+}
+
+// wrapper with context for save commands
+func (d Device) SaveConfigWithContext(ctx context.Context) (string, error) {
+	executor := NewContextExecutor(ctx, 30*time.Second)
+
+	var output string
+	err := executor.Execute(func() error {
+		var execErr error
+		output, execErr = d.SaveConfig()
+		return execErr
+	})
+
+	return output, err
 }

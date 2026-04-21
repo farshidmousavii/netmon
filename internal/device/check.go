@@ -1,8 +1,8 @@
 package device
 
 import (
+	"context"
 	"fmt"
-	"sync"
 
 	"github.com/farshidmousavii/netmon/internal/config"
 	"github.com/farshidmousavii/netmon/internal/logger"
@@ -10,13 +10,20 @@ import (
 	"github.com/farshidmousavii/netmon/internal/snmp"
 )
 
-func CheckDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.WaitGroup, reports chan<- report.DeviceReport, skipBackup bool) {
-	defer wg.Done()
+func CheckDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport, skipBackup bool) {
 
 	report := report.DeviceReport{
 		Name: deviceCfg.Name,
 		IP:   deviceCfg.IP,
 		Type: deviceCfg.Vendor,
+	}
+
+	select {
+	case <-ctx.Done():
+		report.Error = fmt.Errorf("operation cancelled")
+		reports <- report
+		return
+	default:
 	}
 
 	cred, err := cfg.GetCredential(deviceCfg.Credential)
@@ -36,6 +43,14 @@ func CheckDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.Wai
 		return
 	}
 
+	select {
+	case <-ctx.Done():
+		report.Error = fmt.Errorf("operation cancelled")
+		reports <- report
+		return
+	default:
+	}
+
 	// Ping
 	pingTime, err := device.Ping()
 	if err != nil {
@@ -49,6 +64,12 @@ func CheckDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.Wai
 
 	// SNMP
 	if cfg.SNMP != nil {
+		select {
+		case <-ctx.Done():
+			reports <- report
+			return
+		default:
+		}
 		oid, err := device.GetVendorSNMP(cfg.SNMP.Community, cfg.SNMP.Timeout)
 		if err != nil {
 			logger.Warning("device %s: Failed to get vendor via SNMP : %v", device.IP, err)

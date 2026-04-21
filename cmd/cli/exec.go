@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -66,6 +67,7 @@ func init() {
 }
 
 func runExec(cmd *cobra.Command, args []string) {
+	ctx := cmd.Context()
 	if err := logger.Init(false); err != nil {
 		log.Fatal(err)
 	}
@@ -118,7 +120,7 @@ func runExec(cmd *cobra.Command, args []string) {
 	logger.Info("Executing %d command(s) on %d device(s)", len(execCommands), len(targetDevices))
 
 	// Execute
-	results := executeOnDevices(cfg, targetDevices, execCommands, execSave)
+	results := executeOnDevices(ctx, cfg, targetDevices, execCommands, execSave)
 
 	// Print results
 	printExecResults(results)
@@ -222,15 +224,19 @@ func confirmExecution(targetDevices []config.DeviceConfig, commands []string, sa
 	return answer == "yes" || answer == "y"
 }
 
-func executeOnDevices(cfg *config.Config, targetDevices []config.DeviceConfig, commands []string, saveConfig bool) []device.ExecResult {
+func executeOnDevices(ctx context.Context, cfg *config.Config, targetDevices []config.DeviceConfig, commands []string, saveConfig bool) []device.ExecResult {
 	results := make(chan device.ExecResult, len(targetDevices))
 	var wg sync.WaitGroup
 
 	for _, deviceCfg := range targetDevices {
+		if ctx.Err() != nil {
+			logger.Warning("Execution cancelled before processing all devices")
+			break
+		}
+
 		wg.Add(1)
 		go func(dcfg config.DeviceConfig) {
 			defer wg.Done()
-
 			result := device.ExecResult{
 				DeviceName: dcfg.Name,
 				DeviceIP:   dcfg.IP,
@@ -251,7 +257,7 @@ func executeOnDevices(cfg *config.Config, targetDevices []config.DeviceConfig, c
 			}
 
 			// execute commands
-			output, err := dev.RunCommands(commands)
+			output, err := dev.RunCommandsWithContext(ctx, commands)
 			if err != nil {
 				result.Error = err
 				results <- result
@@ -260,7 +266,7 @@ func executeOnDevices(cfg *config.Config, targetDevices []config.DeviceConfig, c
 
 			// save flag only for cisco
 			if saveConfig && strings.EqualFold(dcfg.Vendor, "cisco") {
-				saveOutput, saveErr := dev.SaveConfig()
+				saveOutput, saveErr := dev.SaveConfigWithContext(ctx)
 				if saveErr != nil {
 					output += "\n\n[WARN] Failed to save config: " + saveErr.Error()
 				} else {
@@ -273,7 +279,20 @@ func executeOnDevices(cfg *config.Config, targetDevices []config.DeviceConfig, c
 		}(deviceCfg)
 	}
 
-	wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// all done
+	case <-ctx.Done():
+		logger.Warning("Execution interrupted - waiting for active operations to complete...")
+		<-done
+	}
+
 	close(results)
 
 	// getting results

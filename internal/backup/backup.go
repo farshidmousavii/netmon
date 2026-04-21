@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/farshidmousavii/netmon/internal/config"
@@ -17,12 +17,20 @@ import (
 	"github.com/farshidmousavii/netmon/internal/report"
 )
 
-func BackupDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.WaitGroup, reports chan<- report.DeviceReport) {
-	defer wg.Done()
+func BackupDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport) {
+
 	report := report.DeviceReport{
 		Name: deviceCfg.Name,
 		IP:   deviceCfg.IP,
 		Type: deviceCfg.Vendor,
+	}
+
+	select {
+	case <-ctx.Done():
+		report.Error = fmt.Errorf("operation cancelled")
+		reports <- report
+		return
+	default:
 	}
 
 	cred, err := cfg.GetCredential(deviceCfg.Credential)
@@ -42,6 +50,14 @@ func BackupDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.Wa
 		return
 	}
 
+	select {
+	case <-ctx.Done():
+		report.Error = fmt.Errorf("operation cancelled")
+		reports <- report
+		return
+	default:
+	}
+
 	output, err := device.ShowCommand()
 	if err != nil {
 		logger.Error("device %s: failed to get config: %v", device.IP, err)
@@ -53,6 +69,14 @@ func BackupDevice(deviceCfg config.DeviceConfig, cfg *config.Config, wg *sync.Wa
 	hostname := extractHostname(device.Type(), output)
 	if hostname == "" {
 		hostname = device.IP
+	}
+
+	select {
+	case <-ctx.Done():
+		report.Error = fmt.Errorf("operation cancelled")
+		reports <- report
+		return
+	default:
 	}
 
 	filePathAddress, err := WriteToFile(hostname, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
