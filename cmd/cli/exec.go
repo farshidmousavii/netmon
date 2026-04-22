@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/farshidmousavii/netmon/internal/config"
@@ -226,7 +227,21 @@ func confirmExecution(targetDevices []config.DeviceConfig, commands []string, sa
 
 func executeOnDevices(ctx context.Context, cfg *config.Config, targetDevices []config.DeviceConfig, commands []string, saveConfig bool) []device.ExecResult {
 	results := make(chan device.ExecResult, len(targetDevices))
+	progress := make(chan string, 100)
 	var wg sync.WaitGroup
+
+	// Progress tracking
+	var completedCount int32
+	totalDevices := len(targetDevices)
+
+	// Progress printer goroutine
+	progressDone := make(chan struct{})
+	go func() {
+		for msg := range progress {
+			fmt.Println(msg)
+		}
+		close(progressDone)
+	}()
 
 	for _, deviceCfg := range targetDevices {
 		if ctx.Err() != nil {
@@ -237,10 +252,17 @@ func executeOnDevices(ctx context.Context, cfg *config.Config, targetDevices []c
 		wg.Add(1)
 		go func(dcfg config.DeviceConfig) {
 			defer wg.Done()
+			defer func() {
+				count := atomic.AddInt32(&completedCount, 1) // ← thread-safe increment
+				progress <- fmt.Sprintf("[%d/%d] ✓ Completed: %s (%s)", count, totalDevices, dcfg.Name, dcfg.IP)
+			}()
+
 			result := device.ExecResult{
 				DeviceName: dcfg.Name,
 				DeviceIP:   dcfg.IP,
 			}
+
+			progress <- fmt.Sprintf("→ Starting: %s (%s)", dcfg.Name, dcfg.IP)
 
 			cred, err := cfg.GetCredential(dcfg.Credential)
 			if err != nil {
@@ -266,6 +288,7 @@ func executeOnDevices(ctx context.Context, cfg *config.Config, targetDevices []c
 
 			// save flag only for cisco
 			if saveConfig && strings.EqualFold(dcfg.Vendor, "cisco") {
+				progress <- fmt.Sprintf("  ↳ Saving config on %s", dcfg.Name)
 				saveOutput, saveErr := dev.SaveConfigWithContext(ctx)
 				if saveErr != nil {
 					output += "\n\n[WARN] Failed to save config: " + saveErr.Error()
@@ -289,11 +312,14 @@ func executeOnDevices(ctx context.Context, cfg *config.Config, targetDevices []c
 	case <-done:
 		// all done
 	case <-ctx.Done():
-		logger.Warning("Execution interrupted - waiting for active operations to complete...")
+		progress <- "⚠ Execution interrupted - waiting for active operations..."
+
 		<-done
 	}
 
 	close(results)
+	close(progress)
+	<-progressDone
 
 	// getting results
 	var allResults []device.ExecResult
