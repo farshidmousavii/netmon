@@ -17,7 +17,19 @@ import (
 	"github.com/farshidmousavii/netmon/internal/report"
 )
 
+// SessionTimestamp - Fixed timestamp for the entire backup session
+var SessionTimestamp string
+
+// InitSession - Initializing timestamp
+func InitSession() {
+	if SessionTimestamp == "" {
+		SessionTimestamp = time.Now().Format("2006-01-02_15-04")
+	}
+}
+
 func BackupDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport) {
+
+	InitSession()
 
 	report := report.DeviceReport{
 		Name: deviceCfg.Name,
@@ -79,7 +91,7 @@ func BackupDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *confi
 	default:
 	}
 
-	filePathAddress, err := WriteToFile(hostname, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath)
+	filePathAddress, err := WriteToFile(hostname, device.Type(), output, cfg.Backup.Directory, cfg.Backup.ArchivePath, SessionTimestamp)
 	if err != nil {
 		logger.Error("device %s: failed to write backup: %v", device.IP, err)
 		report.Error = fmt.Errorf("device %s: failed to write backup: %w", device.IP, err)
@@ -99,10 +111,9 @@ func BackupDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *confi
 
 }
 
-func WriteToFile(hostname, deviceType, output, backupDirectory, archivePath string) (string, error) {
-	now := time.Now().Format("2006-01-02_15-04")
+func WriteToFile(hostname, deviceType, output, backupDirectory, archivePath, sessionTime string) (string, error) {
 
-	dirPath := filepath.Join(backupDirectory, deviceType, now)
+	dirPath := filepath.Join(backupDirectory, sessionTime, deviceType)
 
 	if err := os.MkdirAll(dirPath, 0755); err != nil {
 		return "", fmt.Errorf("create backup directory: %w", err)
@@ -124,7 +135,7 @@ func WriteToFile(hostname, deviceType, output, backupDirectory, archivePath stri
 	}
 
 	if archivePath != "" {
-		if err := moveFile(filePath, archivePath, deviceType); err != nil {
+		if err := moveFile(filePath, archivePath, deviceType, sessionTime); err != nil {
 			return "", fmt.Errorf("move to archive: %w", err)
 		}
 	}
@@ -180,7 +191,7 @@ func atomicWrite(dst string, data []byte) error {
 	return nil
 }
 
-func moveFile(src, destDir, deviceType string) error {
+func moveFile(src, destDir, deviceType, sessionTime string) error {
 	info, err := os.Stat(destDir)
 	if err != nil {
 		return fmt.Errorf("stat destination dir: %w", err)
@@ -190,8 +201,7 @@ func moveFile(src, destDir, deviceType string) error {
 		return fmt.Errorf("%s is not directory", destDir)
 	}
 
-	now := time.Now().Format("2006-01-02_15-04")
-	dirName := filepath.Join(destDir, now, deviceType)
+	dirName := filepath.Join(destDir, sessionTime, deviceType)
 
 	if err = os.MkdirAll(dirName, 0755); err != nil {
 		return fmt.Errorf("create archive directory: %w", err)
@@ -201,8 +211,6 @@ func moveFile(src, destDir, deviceType string) error {
 
 	// Try rename first (fast path)
 	if err := os.Rename(src, dst); err == nil {
-		// check folder is empty ?
-		cleanupEmptyDir(filepath.Dir(src))
 		return nil
 	}
 
@@ -215,9 +223,6 @@ func moveFile(src, destDir, deviceType string) error {
 	if err := os.Remove(src); err != nil {
 		return fmt.Errorf("remove source file: %w", err)
 	}
-
-	// check folder is empty ?
-	cleanupEmptyDir(filepath.Dir(src))
 
 	return nil
 }
@@ -251,24 +256,6 @@ func copyFile(src, dst string) error {
 	}
 
 	return nil
-}
-
-func cleanupEmptyDir(dir string) {
-	//check is empty ?
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		logger.Warning("Failed to read directory %s: %v", dir, err)
-		return
-	}
-
-	// if folder is empty , remove it
-	if len(entries) == 0 {
-		if err := os.Remove(dir); err != nil {
-			logger.Warning("Failed to remove empty directory %s: %v", dir, err)
-		} else {
-			logger.Info("Removed empty backup directory: %s", dir)
-		}
-	}
 }
 
 func extractHostname(deviceType, backupConfig string) string {
@@ -332,4 +319,33 @@ var promptRegex = regexp.MustCompile(`^[a-zA-Z0-9\-_\.]+[>#]`)
 
 func isCiscoPrompt(line string) bool {
 	return promptRegex.MatchString(line)
+}
+
+func CleanupEmptyDirectories(backupDir string) {
+	// find all of empty subfolders
+	filepath.Walk(backupDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if !info.IsDir() {
+			return nil
+		}
+
+		//check if folder is empty or not
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil
+		}
+
+		if len(entries) == 0 {
+			if err := os.Remove(path); err != nil {
+				logger.Warning("Failed to remove empty directory %s: %v", path, err)
+			} else {
+				logger.Info("Removed empty backup directory: %s", path)
+			}
+		}
+
+		return nil
+	})
 }
