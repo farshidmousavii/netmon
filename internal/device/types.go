@@ -32,10 +32,3 @@ type SSHConfig struct {
 	Timeout     time.Duration
 	RetryConfig retry.Config
 }
-
-func DefaultSSHConfig() SSHConfig {
-	return SSHConfig{
-		Timeout:     30 * time.Second,
-		RetryConfig: retry.SSHConfig(),
-	}
-}

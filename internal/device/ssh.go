@@ -10,6 +10,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+func DefaultSSHConfig() SSHConfig {
+	return SSHConfig{
+		Timeout:     10 * time.Second,
+		RetryConfig: retry.SSHConfig(),
+	}
+}
+
 func sshToDeviceWithRetry(ctx context.Context, ip, port, username, password string, config SSHConfig) (*ssh.Client, error) {
 	var client *ssh.Client
 

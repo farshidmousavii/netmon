@@ -32,8 +32,8 @@ func DefaultConfig() Config {
 func SSHConfig() Config {
 	return Config{
 		MaxAttempts:  3,
-		InitialDelay: 1 * time.Second,
-		MaxDelay:     10 * time.Second,
+		InitialDelay: 500 * time.Millisecond,
+		MaxDelay:     5 * time.Second,
 		Multiplier:   2.0,
 	}
 }
@@ -44,9 +44,11 @@ func Do(ctx context.Context, cfg Config, operation string, fn func() error) erro
 	delay := cfg.InitialDelay
 
 	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
-		// Check context before attempt
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("operation cancelled: %w", err)
+		// Context check before each attempt
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("operation cancelled before attempt %d: %w", attempt, ctx.Err())
+		default:
 		}
 
 		err := fn()
@@ -59,12 +61,10 @@ func Do(ctx context.Context, cfg Config, operation string, fn func() error) erro
 
 		lastErr = err
 
-		// If the error cannot be retried, return immediately.
 		if !IsRetryable(err) {
 			return fmt.Errorf("%s failed (non-retryable): %w", operation, err)
 		}
 
-		// If it was the last attempt
 		if attempt >= cfg.MaxAttempts {
 			break
 		}
@@ -72,19 +72,18 @@ func Do(ctx context.Context, cfg Config, operation string, fn func() error) erro
 		logger.Warning("%s failed (attempt %d/%d): %v - retrying in %v",
 			operation, attempt, cfg.MaxAttempts, err, delay)
 
-		// Wait with context
-		select {
-		case <-time.After(delay):
-			// OK - continue to next attempt
-		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled during retry: %w", ctx.Err())
+		//  Wait with context - we check every 100ms
+		retryDeadline := time.Now().Add(delay)
+		for time.Now().Before(retryDeadline) {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("operation cancelled during retry wait: %w", ctx.Err())
+			case <-time.After(100 * time.Millisecond):
+				//  wait
+			}
 		}
 
-		// Exponential backoff
-		delay = time.Duration(float64(delay) * cfg.Multiplier)
-		if delay > cfg.MaxDelay {
-			delay = cfg.MaxDelay
-		}
+		delay = min(time.Duration(float64(delay)*cfg.Multiplier), cfg.MaxDelay)
 	}
 
 	return fmt.Errorf("%s failed after %d attempts: %w", operation, cfg.MaxAttempts, lastErr)
