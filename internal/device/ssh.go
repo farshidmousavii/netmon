@@ -1,29 +1,43 @@
 package device
 
 import (
+	"context"
+	"fmt"
+	"net"
 	"time"
 
+	"github.com/farshidmousavii/netmon/internal/retry"
 	"golang.org/x/crypto/ssh"
 )
 
-func sshToDevice(ip, port, username, password string) (*ssh.Client, error) {
-	serverAddress := ip + ":" + port
-	config := &ssh.ClientConfig{
+func sshToDeviceWithRetry(ctx context.Context, ip, port, username, password string, config SSHConfig) (*ssh.Client, error) {
+	var client *ssh.Client
+
+	err := retry.Do(ctx, config.RetryConfig, fmt.Sprintf("SSH to %s", ip), func() error {
+		var connectErr error
+		client, connectErr = sshToDeviceWithContext(ctx, ip, port, username, password, config.Timeout)
+		return connectErr
+	})
+
+	return client, err
+}
+
+// sshToDeviceWithTimeout - SSH connection with timeout
+func sshToDeviceWithTimeout(ip, port, username, password string, timeout time.Duration) (*ssh.Client, error) {
+	sshConfig := &ssh.ClientConfig{
 		User: username,
 		Auth: []ssh.AuthMethod{
 			ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
-				//for each question return password
 				answers := make([]string, len(questions))
 				for i := range questions {
 					answers[i] = password
 				}
 				return answers, nil
 			}),
-			//regular method
 			ssh.Password(password),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         time.Second * 5,
+		Timeout:         timeout,
 		Config: ssh.Config{
 			KeyExchanges: []string{
 				"diffie-hellman-group1-sha1",
@@ -44,8 +58,41 @@ func sshToDevice(ip, port, username, password string) (*ssh.Client, error) {
 		},
 	}
 
-	conn, err := ssh.Dial("tcp", serverAddress, config)
+	address := net.JoinHostPort(ip, port)
 
-	return conn, err
+	client, err := ssh.Dial("tcp", address, sshConfig)
+	if err != nil {
+		return nil, fmt.Errorf("SSH dial failed: %w", err)
+	}
 
+	return client, nil
+}
+
+func sshToDeviceWithContext(ctx context.Context, ip, port, username, password string, timeout time.Duration) (*ssh.Client, error) {
+	type result struct {
+		client *ssh.Client
+		err    error
+	}
+
+	resultChan := make(chan result, 1)
+
+	// SSH connection in a separate goroutine
+	go func() {
+		client, err := sshToDeviceWithTimeout(ip, port, username, password, timeout)
+		resultChan <- result{client: client, err: err}
+	}()
+
+	// Wait with context
+	select {
+	case res := <-resultChan:
+		return res.client, res.err
+	case <-ctx.Done():
+		// Context cancel شد
+		return nil, fmt.Errorf("SSH connection cancelled: %w", ctx.Err())
+	}
+}
+
+// Old use for backward compatibility
+func sshToDevice(ip, port, username, password string) (*ssh.Client, error) {
+	return sshToDeviceWithRetry(context.Background(), ip, port, username, password, DefaultSSHConfig())
 }

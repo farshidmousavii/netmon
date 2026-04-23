@@ -1,5 +1,11 @@
 package device
 
+import (
+	"time"
+
+	"github.com/farshidmousavii/netmon/internal/retry"
+)
+
 type Device struct {
 	IP       string
 	Port     string
@@ -20,4 +26,16 @@ type ExecResult struct {
 	DeviceIP   string
 	Output     string
 	Error      error
+}
+
+type SSHConfig struct {
+	Timeout     time.Duration
+	RetryConfig retry.Config
+}
+
+func DefaultSSHConfig() SSHConfig {
+	return SSHConfig{
+		Timeout:     30 * time.Second,
+		RetryConfig: retry.SSHConfig(),
+	}
 }
