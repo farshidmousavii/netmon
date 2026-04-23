@@ -8,11 +8,12 @@ import (
 )
 
 var (
-	configPath string
-	logToFile  bool
-	skipBackup bool
-	skipSNMP   bool
-	jsonOutput bool
+	configPath  string
+	logToFile   bool
+	skipBackup  bool
+	skipSNMP    bool
+	jsonOutput  bool
+	concurrency int
 )
 
 var (
@@ -33,6 +34,7 @@ func Execute() {
 func init() {
 
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to config file(config.yaml or devices.csv)")
+	rootCmd.PersistentFlags().IntVar(&concurrency, "concurrency", 10, "max concurrent device operations (1-50)")
 
 }
 

@@ -53,9 +53,15 @@ func runMonitor(cmd *cobra.Command, args []string) {
 
 	applyMonitoroverrides(cfg)
 
-	allReports := RunOnDevices(ctx, cfg, func(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport) {
-		device.CheckDevice(ctx, deviceCfg, cfg, reports, skipBackup)
-	}, "network monitor")
+	allReports := RunOnDevicesWithPool(
+		ctx,
+		cfg,
+		cfg.Devices,
+		func(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport) {
+			device.CheckDevice(ctx, deviceCfg, cfg, reports, skipBackup)
+		},
+		"network monitor",
+	)
 
 	if jsonOutput {
 		if err := report.ReportToJson(allReports); err != nil {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"log"
 
 	"github.com/farshidmousavii/netmon/internal/backup"
@@ -39,7 +40,19 @@ func runBackup(cmd *cobra.Command, args []string) {
 
 	logger.Info("Starting backup")
 
-	allReports := RunOnDevices(ctx, cfg, backup.BackupDevice, "backup")
+	backup.InitSession()
+
+	allReports := RunOnDevicesWithPool(
+		ctx,
+		cfg,
+		cfg.Devices,
+		func(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport) {
+			backup.BackupDevice(ctx, deviceCfg, cfg, reports)
+		},
+		"backup",
+	)
+
+	backup.CleanupEmptyDirectories(cfg.Backup.Directory)
 
 	if jsonOutput {
 		if err := report.ReportToJson(allReports); err != nil {

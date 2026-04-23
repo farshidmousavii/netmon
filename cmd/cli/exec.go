@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/farshidmousavii/netmon/internal/config"
@@ -226,108 +224,22 @@ func confirmExecution(targetDevices []config.DeviceConfig, commands []string, sa
 }
 
 func executeOnDevices(ctx context.Context, cfg *config.Config, targetDevices []config.DeviceConfig, commands []string, saveConfig bool) []device.ExecResult {
-	results := make(chan device.ExecResult, len(targetDevices))
 	progress := make(chan string, 100)
-	var wg sync.WaitGroup
 
-	// Progress tracking
-	var completedCount int32
-	totalDevices := len(targetDevices)
-
-	// Progress printer goroutine
-	progressDone := make(chan struct{})
-	go func() {
-		for msg := range progress {
-			fmt.Println(msg)
-		}
-		close(progressDone)
-	}()
-
-	for _, deviceCfg := range targetDevices {
-		if ctx.Err() != nil {
-			logger.Warning("Execution cancelled before processing all devices")
-			break
+	// helper
+	return RunExecWithPool(ctx, cfg, targetDevices, func(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, results chan<- device.ExecResult) {
+		result := device.ExecResult{
+			DeviceName: deviceCfg.Name,
+			DeviceIP:   deviceCfg.IP,
 		}
 
-		wg.Add(1)
-		go func(dcfg config.DeviceConfig) {
-			defer wg.Done()
-			defer func() {
-				count := atomic.AddInt32(&completedCount, 1) // ← thread-safe increment
-				progress <- fmt.Sprintf("[%d/%d] ✓ Completed: %s (%s)", count, totalDevices, dcfg.Name, dcfg.IP)
-			}()
+		// Execute
+		if err := executeDeviceWithRetry(ctx, deviceCfg, cfg, commands, saveConfig, &result, progress); err != nil {
+			result.Error = err
+		}
 
-			result := device.ExecResult{
-				DeviceName: dcfg.Name,
-				DeviceIP:   dcfg.IP,
-			}
-
-			progress <- fmt.Sprintf("→ Starting: %s (%s)", dcfg.Name, dcfg.IP)
-
-			cred, err := cfg.GetCredential(dcfg.Credential)
-			if err != nil {
-				result.Error = fmt.Errorf("get credential: %w", err)
-				results <- result
-				return
-			}
-
-			dev, err := device.NewDevice(dcfg, cred)
-			if err != nil {
-				result.Error = fmt.Errorf("create device: %w", err)
-				results <- result
-				return
-			}
-
-			// execute commands
-			output, err := dev.RunCommandsWithContext(ctx, commands)
-			if err != nil {
-				result.Error = err
-				results <- result
-				return
-			}
-
-			// save flag only for cisco
-			if saveConfig && strings.EqualFold(dcfg.Vendor, "cisco") {
-				progress <- fmt.Sprintf("  ↳ Saving config on %s", dcfg.Name)
-				saveOutput, saveErr := dev.SaveConfigWithContext(ctx)
-				if saveErr != nil {
-					output += "\n\n[WARN] Failed to save config: " + saveErr.Error()
-				} else {
-					output += "\n\n" + saveOutput
-				}
-			}
-
-			result.Output = output
-			results <- result
-		}(deviceCfg)
-	}
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// all done
-	case <-ctx.Done():
-		progress <- "⚠ Execution interrupted - waiting for active operations..."
-
-		<-done
-	}
-
-	close(results)
-	close(progress)
-	<-progressDone
-
-	// getting results
-	var allResults []device.ExecResult
-	for r := range results {
-		allResults = append(allResults, r)
-	}
-
-	return allResults
+		results <- result
+	}, "execution")
 }
 
 func printExecResults(results []device.ExecResult) {
@@ -391,5 +303,37 @@ func saveOutputFile(results []device.ExecResult, outputPath string) error {
 		fmt.Fprintf(file, "%s\n\n", strings.Repeat("=", 70))
 	}
 
+	return nil
+}
+
+func executeDeviceWithRetry(ctx context.Context, dcfg config.DeviceConfig, cfg *config.Config, commands []string, saveConfig bool, result *device.ExecResult, progress chan<- string) error {
+	cred, err := cfg.GetCredential(dcfg.Credential)
+	if err != nil {
+		return fmt.Errorf("get credential: %w", err)
+	}
+
+	dev, err := device.NewDevice(dcfg, cred)
+	if err != nil {
+		return fmt.Errorf("create device: %w", err)
+	}
+
+	// Execute commands
+	output, err := dev.RunCommandsWithContext(ctx, commands)
+	if err != nil {
+		return err
+	}
+
+	// Save config
+	if saveConfig && strings.EqualFold(dcfg.Vendor, "cisco") {
+		progress <- fmt.Sprintf("  ↳ Saving config on %s", dcfg.Name)
+		saveOutput, saveErr := dev.SaveConfigWithContext(ctx)
+		if saveErr != nil {
+			output += "\n\n[WARN] Failed to save config: " + saveErr.Error()
+		} else {
+			output += "\n\n" + saveOutput
+		}
+	}
+
+	result.Output = output
 	return nil
 }
