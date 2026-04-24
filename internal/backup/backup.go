@@ -54,7 +54,7 @@ func BackupDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *confi
 	}
 
 	// new device
-	device, err := device.NewDevice(deviceCfg, cred)
+	device, err := device.NewDevice(deviceCfg, cred, cfg)
 	if err != nil {
 		logger.Error("device %s: failed to create: %v", deviceCfg.Name, err)
 		report.Error = err

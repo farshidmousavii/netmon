@@ -7,43 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/farshidmousavii/netmon/internal/config"
 	"github.com/farshidmousavii/netmon/internal/logger"
 )
 
-// Config - Retry settings
-type Config struct {
-	MaxAttempts  int
-	InitialDelay time.Duration
-	MaxDelay     time.Duration
-	Multiplier   float64 //exponential backoff
-}
-
-// DefaultConfig - Defaullt settings
-func DefaultConfig() Config {
-	return Config{
-		MaxAttempts:  3,
-		InitialDelay: 2 * time.Second,
-		MaxDelay:     30 * time.Second,
-		Multiplier:   2.0,
-	}
-}
-
-// SSHConfig - SSH-specific settings
-func SSHConfig() Config {
-	return Config{
-		MaxAttempts:  3,
-		InitialDelay: 500 * time.Millisecond,
-		MaxDelay:     5 * time.Second,
-		Multiplier:   2.0,
-	}
-}
-
 // Do - execute function with retry
-func Do(ctx context.Context, cfg Config, operation string, fn func() error) error {
+func Do(ctx context.Context, cfg *config.SSHSettings, operation string, fn func() error) error {
 	var lastErr error
-	delay := cfg.InitialDelay
-
-	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
+	delay := time.Duration(cfg.Retry.InitialDelay) * time.Second
+	for attempt := 1; attempt <= cfg.Retry.MaxAttempts; attempt++ {
 		// Context check before each attempt
 		select {
 		case <-ctx.Done():
@@ -54,7 +26,7 @@ func Do(ctx context.Context, cfg Config, operation string, fn func() error) erro
 		err := fn()
 		if err == nil {
 			if attempt > 1 {
-				logger.Info("%s succeeded on attempt %d/%d", operation, attempt, cfg.MaxAttempts)
+				logger.Info("%s succeeded on attempt %d/%d", operation, attempt, cfg.Retry.MaxAttempts)
 			}
 			return nil
 		}
@@ -65,12 +37,12 @@ func Do(ctx context.Context, cfg Config, operation string, fn func() error) erro
 			return fmt.Errorf("%s failed (non-retryable): %w", operation, err)
 		}
 
-		if attempt >= cfg.MaxAttempts {
+		if attempt >= cfg.Retry.MaxAttempts {
 			break
 		}
 
 		logger.Warning("%s failed (attempt %d/%d): %v - retrying in %v",
-			operation, attempt, cfg.MaxAttempts, err, delay)
+			operation, attempt, cfg.Retry.MaxAttempts, err, delay)
 
 		//  Wait with context - we check every 100ms
 		retryDeadline := time.Now().Add(delay)
@@ -83,10 +55,10 @@ func Do(ctx context.Context, cfg Config, operation string, fn func() error) erro
 			}
 		}
 
-		delay = min(time.Duration(float64(delay)*cfg.Multiplier), cfg.MaxDelay)
+		delay = min(time.Duration(float64(delay)*cfg.Retry.Multiplier), time.Duration(cfg.Retry.MaxDelay)*time.Second)
 	}
 
-	return fmt.Errorf("%s failed after %d attempts: %w", operation, cfg.MaxAttempts, lastErr)
+	return fmt.Errorf("%s failed after %d attempts: %w", operation, cfg.Retry.MaxAttempts, lastErr)
 }
 
 // IsRetryable - Checks whether the error is retryable or not

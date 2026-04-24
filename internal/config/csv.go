@@ -10,10 +10,10 @@ import (
 )
 
 // parseCSV - support reading settings + CSV
-func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPConfig, BackupConfig, error) {
+func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPConfig, *SSHSettings, BackupConfig, error) {
 	file, err := os.Open(csvPath)
 	if err != nil {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf("open CSV file: %w", err)
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("open CSV file: %w", err)
 	}
 	defer file.Close()
 
@@ -27,6 +27,8 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 		ArchivePath: "",
 	}
 
+	sshSettings := DefaultSSHSettings()
+
 	// --- Phase 1: read line-by-line ---
 	scanner := bufio.NewScanner(file)
 	var csvLines []string
@@ -39,7 +41,7 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 		}
 
 		if strings.HasPrefix(line, "#") {
-			parseSetting(line, snmpConfig, &backupConfig)
+			parseSetting(line, snmpConfig, sshSettings, &backupConfig)
 			continue
 		}
 
@@ -47,11 +49,11 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf("scan file: %w", err)
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("scan file: %w", err)
 	}
 
 	if len(csvLines) == 0 {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf("no CSV data found")
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("no CSV data found")
 	}
 
 	// --- Phase 2: parse CSV only ---
@@ -60,11 +62,11 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 
 	allLines, err := reader.ReadAll()
 	if err != nil {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf("read CSV: %w", err)
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("read CSV: %w", err)
 	}
 
 	if len(allLines) == 0 {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf("CSV file is empty")
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("CSV file is empty")
 	}
 
 	// --- Header ---
@@ -75,7 +77,7 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 
 	expectedHeader := []string{"name", "ip", "port", "vendor", "username", "password"}
 	if !equalSlices(headerLine, expectedHeader) {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf(
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf(
 			"invalid CSV header\nExpected: %v\nGot: %v",
 			expectedHeader, headerLine,
 		)
@@ -89,7 +91,7 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 		lineNum := i + 2 // +1 for header +1 for index
 
 		if len(record) != 6 {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf(
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf(
 				"line %d: expected 6 columns, got %d",
 				lineNum, len(record),
 			)
@@ -103,25 +105,25 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 		password := strings.TrimSpace(record[5])
 
 		if name == "" {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: device name cannot be empty", lineNum)
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: device name cannot be empty", lineNum)
 		}
 		if ip == "" {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: IP cannot be empty", lineNum)
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: IP cannot be empty", lineNum)
 		}
 
 		portNum, err := strconv.Atoi(port)
 		if err != nil || portNum < 1 || portNum > 65535 {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: invalid port '%s'", lineNum, port)
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: invalid port '%s'", lineNum, port)
 		}
 
 		if vendor == "" {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: vendor cannot be empty", lineNum)
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: vendor cannot be empty", lineNum)
 		}
 		if username == "" {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: username cannot be empty", lineNum)
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: username cannot be empty", lineNum)
 		}
 		if password == "" {
-			return nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: password cannot be empty", lineNum)
+			return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("line %d: password cannot be empty", lineNum)
 		}
 
 		credName := fmt.Sprintf("csv_%s", name)
@@ -140,14 +142,14 @@ func parseCSV(csvPath string) ([]DeviceConfig, map[string]CredentialInfo, *SNMPC
 	}
 
 	if len(devices) == 0 {
-		return nil, nil, nil, BackupConfig{}, fmt.Errorf("no devices found in CSV")
+		return nil, nil, nil, nil, BackupConfig{}, fmt.Errorf("no devices found in CSV")
 	}
 
-	return devices, credentials, snmpConfig, backupConfig, nil
+	return devices, credentials, snmpConfig, sshSettings, backupConfig, nil
 }
 
 // --- Settings parser ---
-func parseSetting(line string, snmp *SNMPConfig, backup *BackupConfig) {
+func parseSetting(line string, snmp *SNMPConfig, ssh *SSHSettings, backup *BackupConfig) {
 	line = strings.TrimPrefix(line, "#")
 	line = strings.TrimSpace(line)
 
@@ -174,6 +176,27 @@ func parseSetting(line string, snmp *SNMPConfig, backup *BackupConfig) {
 		backup.Directory = value
 	case "backup_archive":
 		backup.ArchivePath = value
+
+	case "ssh_timeout":
+		if timeout, err := strconv.Atoi(value); err == nil && timeout > 0 {
+			ssh.Timeout = timeout
+		}
+	case "ssh_retry_attempts":
+		if attempts, err := strconv.Atoi(value); err == nil && attempts > 0 {
+			ssh.Retry.MaxAttempts = attempts
+		}
+	case "ssh_retry_initial_delay":
+		if delay, err := strconv.Atoi(value); err == nil && delay > 0 {
+			ssh.Retry.InitialDelay = delay
+		}
+	case "ssh_retry_max_delay":
+		if delay, err := strconv.Atoi(value); err == nil && delay > 0 {
+			ssh.Retry.MaxDelay = delay
+		}
+	case "ssh_retry_multiplier":
+		if mult, err := strconv.ParseFloat(value, 64); err == nil && mult > 0 {
+			ssh.Retry.Multiplier = mult
+		}
 	}
 }
 

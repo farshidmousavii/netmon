@@ -17,7 +17,7 @@ func (d Device) RunCommand(command string) (string, error) {
 
 // RunCommands - multiple commands
 func (d Device) RunCommands(commands []string) (string, error) {
-	sshClient, err := sshToDevice(d.IP, d.Port, d.Username, d.Password)
+	sshClient, err := sshToDevice(d.IP, d.Port, d.Username, d.Password, d.Config)
 	if err != nil {
 		return "", fmt.Errorf("SSH connection failed: %w", err)
 	}

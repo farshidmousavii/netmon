@@ -6,23 +6,29 @@ import (
 	"net"
 	"time"
 
+	"github.com/farshidmousavii/netmon/internal/config"
 	"github.com/farshidmousavii/netmon/internal/retry"
 	"golang.org/x/crypto/ssh"
 )
 
-func DefaultSSHConfig() SSHConfig {
-	return SSHConfig{
-		Timeout:     10 * time.Second,
-		RetryConfig: retry.SSHConfig(),
+func SSHConfigFromSettings(settings *config.SSHSettings) config.SSHSettings {
+	return config.SSHSettings{
+		Timeout: settings.Timeout,
+		Retry: config.RetrySettings{
+			MaxAttempts:  settings.Retry.MaxAttempts,
+			InitialDelay: settings.Retry.InitialDelay,
+			MaxDelay:     settings.Retry.MaxDelay,
+			Multiplier:   settings.Retry.Multiplier,
+		},
 	}
 }
 
-func sshToDeviceWithRetry(ctx context.Context, ip, port, username, password string, config SSHConfig) (*ssh.Client, error) {
+func sshToDeviceWithRetry(ctx context.Context, ip, port, username, password string, config *config.SSHSettings) (*ssh.Client, error) {
 	var client *ssh.Client
 
-	err := retry.Do(ctx, config.RetryConfig, fmt.Sprintf("SSH to %s", ip), func() error {
+	err := retry.Do(ctx, config, fmt.Sprintf("SSH to %s", ip), func() error {
 		var connectErr error
-		client, connectErr = sshToDeviceWithContext(ctx, ip, port, username, password, config.Timeout)
+		client, connectErr = sshToDeviceWithContext(ctx, ip, port, username, password, time.Duration(config.Timeout)*time.Second)
 		return connectErr
 	})
 
@@ -94,12 +100,14 @@ func sshToDeviceWithContext(ctx context.Context, ip, port, username, password st
 	case res := <-resultChan:
 		return res.client, res.err
 	case <-ctx.Done():
-		// Context cancel شد
+		// if Context canselled
 		return nil, fmt.Errorf("SSH connection cancelled: %w", ctx.Err())
 	}
 }
 
 // Old use for backward compatibility
-func sshToDevice(ip, port, username, password string) (*ssh.Client, error) {
-	return sshToDeviceWithRetry(context.Background(), ip, port, username, password, DefaultSSHConfig())
+func sshToDevice(ip, port, username, password string, cfg *config.Config) (*ssh.Client, error) {
+	sshSettings := cfg.GetSSHSettings()
+	sshConfig := SSHConfigFromSettings(sshSettings)
+	return sshToDeviceWithRetry(context.Background(), ip, port, username, password, &sshConfig)
 }

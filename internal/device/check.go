@@ -35,7 +35,7 @@ func CheckDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config
 	}
 
 	// new device
-	device, err := NewDevice(deviceCfg, cred)
+	device, err := NewDevice(deviceCfg, cred, cfg)
 	if err != nil {
 		logger.Error("device %s: failed to create: %v", deviceCfg.Name, err)
 		report.Error = err

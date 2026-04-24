@@ -1,9 +1,7 @@
 package device
 
 import (
-	"time"
-
-	"github.com/farshidmousavii/netmon/internal/retry"
+	"github.com/farshidmousavii/netmon/internal/config"
 )
 
 type Device struct {
@@ -12,6 +10,7 @@ type Device struct {
 	Username string
 	Password string
 	Vendor   string
+	Config   *config.Config
 }
 
 type DeviceInfo interface {
@@ -26,9 +25,4 @@ type ExecResult struct {
 	DeviceIP   string
 	Output     string
 	Error      error
-}
-
-type SSHConfig struct {
-	Timeout     time.Duration
-	RetryConfig retry.Config
 }

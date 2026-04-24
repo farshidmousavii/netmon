@@ -59,11 +59,19 @@ devices:
 
 snmp:
   community: public
-  timeout: 10
+  timeout: 5
 
 backup:
   directory: backups
   archive_path: ""
+
+ssh:
+  timeout: 5
+  retry:
+    max_attempts: 3
+    initial_delay: 1
+    max_delay: 5
+    multiplier: 2.0
 `
 	if err := os.WriteFile("config.yaml", []byte(configContent), 0644); err != nil {
 		fmt.Printf("✗ Failed to create config.yaml: %v\n", err)
@@ -85,6 +93,10 @@ func createCSVConfig() {
 #snmp_timeout=10
 #backup_dir=backups
 #backup_archive=""
+#ssh_timeout=5
+#ssh_retry_attempts=3
+#ssh_retry_initial_delay=1
+#ssh_retry_max_delay=5
 name,ip,port,vendor,username,password
 core-switch,192.168.1.1,22,cisco,admin,changeme
 dist-switch,192.168.2.1,22,cisco,admin,changeme

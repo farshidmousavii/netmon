@@ -41,6 +41,10 @@ func loadFromYAML(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
 
+	if cfg.SSH == nil {
+		cfg.SSH = DefaultSSHSettings()
+	}
+
 	// Validation
 	if len(cfg.Devices) == 0 {
 		return nil, fmt.Errorf("no devices configured in YAML")
@@ -54,7 +58,7 @@ func loadFromYAML(path string) (*Config, error) {
 }
 
 func loadFromCSV(path string) (*Config, error) {
-	devices, credentials, snmpConfig, backupConfig, err := parseCSV(path)
+	devices, credentials, snmpConfig, sshSettings, backupConfig, err := parseCSV(path)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +68,7 @@ func loadFromCSV(path string) (*Config, error) {
 		Credentials: credentials,
 		SNMP:        snmpConfig,
 		Backup:      backupConfig,
+		SSH:         sshSettings,
 	}
 
 	return cfg, nil

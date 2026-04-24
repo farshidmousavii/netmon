@@ -312,7 +312,7 @@ func executeDeviceWithRetry(ctx context.Context, dcfg config.DeviceConfig, cfg *
 		return fmt.Errorf("get credential: %w", err)
 	}
 
-	dev, err := device.NewDevice(dcfg, cred)
+	dev, err := device.NewDevice(dcfg, cred, cfg)
 	if err != nil {
 		return fmt.Errorf("create device: %w", err)
 	}

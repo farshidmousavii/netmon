@@ -42,7 +42,7 @@ func (d Device) Type() string {
 }
 
 func (d Device) ShowCommand() (string, error) {
-	sshClient, err := sshToDevice(d.IP, d.Port, d.Username, d.Password)
+	sshClient, err := sshToDevice(d.IP, d.Port, d.Username, d.Password, d.Config)
 	if err != nil {
 		return "", fmt.Errorf("Can not login to %s %s", d.IP, err)
 	}
@@ -128,7 +128,7 @@ func (d Device) GetUPTimeSNMP(community string, timeout int) (string, error) {
 	return result, nil
 }
 
-func NewDevice(cfg config.DeviceConfig, credential config.CredentialInfo) (Device, error) {
+func NewDevice(cfg config.DeviceConfig, credential config.CredentialInfo, globalCfg *config.Config) (Device, error) {
 
 	return Device{
 		IP:       cfg.IP,
@@ -136,6 +136,7 @@ func NewDevice(cfg config.DeviceConfig, credential config.CredentialInfo) (Devic
 		Username: credential.Username,
 		Password: credential.Password,
 		Vendor:   cfg.Vendor,
+		Config:   globalCfg,
 	}, nil
 }
 
