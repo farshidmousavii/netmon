@@ -19,14 +19,26 @@ func LoadConfig(path string) (*Config, error) {
 	// detect file extention
 	ext := strings.ToLower(filepath.Ext(path))
 
+	var cfg *Config
+	var err error
+
 	switch ext {
 	case ".yaml", ".yml":
-		return loadFromYAML(path)
+		cfg, err = loadFromYAML(path)
 	case ".csv":
-		return loadFromCSV(path)
+		cfg, err = loadFromCSV(path)
 	default:
 		return nil, fmt.Errorf("unsupported config format: %s (use .yaml or .csv)", ext)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 // loadFromYAML
@@ -40,7 +52,7 @@ func loadFromYAML(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
-
+	//Set defaults if missing
 	if cfg.SSH == nil {
 		cfg.SSH = DefaultSSHSettings()
 	}
