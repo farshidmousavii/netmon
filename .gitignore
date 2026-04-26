@@ -5,6 +5,8 @@ logs/
 log/
 *.log
 *.txt
+.gitattributes
+
 
 # Config files
 config.yaml
@@ -13,6 +15,7 @@ config.yaml
 
 # Build outputs
 netmon-cli
+netmon
 *.exe
 dist/
 bin/
