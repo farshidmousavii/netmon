@@ -10,6 +10,11 @@ import (
 
 // Validate - validation config
 func (c *Config) Validate() error {
+
+	if c == nil {
+		return fmt.Errorf("config is null")
+	}
+
 	if len(c.Devices) == 0 {
 		return fmt.Errorf("no devices configured")
 	}

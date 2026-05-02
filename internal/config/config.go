@@ -30,12 +30,13 @@ func LoadConfig(path string) (*Config, error) {
 	default:
 		return nil, fmt.Errorf("unsupported config format: %s (use .yaml or .csv)", ext)
 	}
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
-	}
 
 	if err != nil {
 		return nil, err
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	return cfg, nil
