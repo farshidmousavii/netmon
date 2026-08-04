@@ -163,7 +163,58 @@ func (m *portFixModel) scanPorts(d config.DeviceConfig) tea.Cmd {
 	}
 }
 
-// fixDevice - clear ALL sticky + bounce ONLY selected ports, verify each
+// findStickyPort - find which interface holds the violating MAC.
+// Returns the interface name, or "" if not determinable.
+func findStickyPort(dev device.Device, errPort string) (string, error) {
+	// 1. get violating MAC from the err-disabled port
+	ifaceOut, err := dev.RunCommand(fmt.Sprintf("show port-security interface %s", errPort))
+	if err != nil {
+		return "", fmt.Errorf("show port-security interface: %w", err)
+	}
+	mac := parseLastSourceAddress(ifaceOut)
+	if mac == "" {
+		return "", nil // no MAC info available
+	}
+
+	// 2. find which port holds that MAC (whole switch table)
+	addrOut, err := dev.RunCommand("show port-security address")
+	if err != nil {
+		return "", fmt.Errorf("show port-security address: %w", err)
+	}
+	port := findPortForMac(addrOut, mac)
+	return port, nil
+}
+
+// parseLastSourceAddress - extract "Last Source Address" MAC from
+// `show port-security interface` output. Format:
+//   Last Source Address:Vlan : 0050.7966.6800:1
+var lastSourceRe = regexp.MustCompile(`Last\s+Source\s+Address:?Vlan\s*:\s*([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})`)
+
+func parseLastSourceAddress(output string) string {
+	if m := lastSourceRe.FindStringSubmatch(output); len(m) > 1 {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
+// findPortForMac - find port column for given MAC in `show port-security address`.
+// Table rows:  Vlan  Mac Address  Type  Ports  Remaining Age
+func findPortForMac(output, mac string) string {
+	mac = strings.ToLower(mac)
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		if strings.ToLower(fields[1]) == mac {
+			return fields[3] // Ports column
+		}
+	}
+	return ""
+}
+
+// fixPorts - clear ONLY the sticky port holding the violating MAC,
+// then bounce selected ports. If MAC not found -> error, user decides.
 func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, ports []string) (string, error) {
 	cred, err := cfg.GetCredential(d.Credential)
 	if err != nil {
@@ -174,18 +225,34 @@ func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, po
 		return "", fmt.Errorf("create device: %w", err)
 	}
 
-	// 1. clear sticky on ALL ports (port moved 1->2: stale sticky on port 1)
-	if _, err := dev.RunCommand("clear port-security sticky"); err != nil {
-		return "", fmt.Errorf("clear all sticky: %w", err)
-	}
-
-	// 2. bounce ONLY selected ports
 	var fixed []string
 	var failed []string
+
 	for _, p := range ports {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
+
+		// find the interface holding the violating MAC (port move 1->2 case)
+		stickyPort, err := findStickyPort(dev, p)
+		if err != nil {
+			failed = append(failed, p+": find sticky failed: "+err.Error())
+			continue
+		}
+
+		if stickyPort == "" {
+			// cannot determine -> safety: refuse, ask user
+			failed = append(failed, p+": cannot find violating MAC (sticky port unknown)")
+			continue
+		}
+
+		// clear ONLY that sticky interface
+		if _, err := dev.RunCommand(fmt.Sprintf("clear port-security sticky interface %s", stickyPort)); err != nil {
+			failed = append(failed, p+": clear sticky "+stickyPort+" failed")
+			continue
+		}
+
+		// bounce the selected port
 		if _, err := dev.RunCommands([]string{
 			fmt.Sprintf("interface %s", p),
 			"shutdown",
@@ -195,6 +262,7 @@ func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, po
 			continue
 		}
 		time.Sleep(1 * time.Second)
+
 		// verify up
 		ver, err := dev.RunCommand(fmt.Sprintf("show interface %s", p))
 		if err == nil && strings.Contains(ver, "up") && !strings.Contains(ver, "down") {
