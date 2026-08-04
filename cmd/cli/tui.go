@@ -52,6 +52,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case switchMsg:
+		if msg.model == nil {
+			// back to menu, reuse root cfg
+			m.mode = newMenuModel(m.cfg)
+			return m, m.mode.Init()
+		}
 		m.mode = msg.model
 		return m, m.mode.Init()
 	case tea.KeyMsg:
@@ -80,7 +85,10 @@ func switchTo(model tea.Model) tea.Cmd {
 }
 
 func backToMenu() tea.Cmd {
-	return func() tea.Msg { return switchMsg{model: newMenuModel(nil)} }
+	return func() tea.Msg {
+		// menu rebuilds from stored cfg (see MenuModel.Update)
+		return switchMsg{model: nil}
+	}
 }
 
 // ─── Menu model ───
