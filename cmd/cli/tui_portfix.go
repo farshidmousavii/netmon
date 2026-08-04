@@ -10,215 +10,161 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/farshidmousavii/netmon/internal/config"
 	"github.com/farshidmousavii/netmon/internal/device"
-	"github.com/farshidmousavii/netmon/internal/logger"
 )
 
-// PortFixStatus - one port's lifecycle
-type PortFixStatus struct {
-	Port     string
-	State    string // "pending" | "err-disabled" | "cleared" | "bounced" | "up" | "failed"
-	Err      string
-	Actioned bool
-}
-
-// PortFixDevice - per-device progress
-type PortFixDevice struct {
-	Device config.DeviceConfig
-	Ports  []PortFixStatus
-	Done   bool
-	Err    string
-}
-
 type portFixModel struct {
-	cfg        *config.Config
-	devices    []config.DeviceConfig
-	results    map[string]*PortFixDevice
-	cursor     int
-	scanning   bool
-	scanningDn string
-	scanErr    string
-	clearing   bool
-	fixedCount int
-	lastMsg    string
+	cfg     *config.Config
+	picker  *DevicePicker
+	running bool
+	results []taskResult
+	done    bool
 }
 
 func newPortFixModel(cfg *config.Config) *portFixModel {
-	m := &portFixModel{cfg: cfg, results: map[string]*PortFixDevice{}}
-	m.devices = cfg.Devices
-	return m
-}
-
-func (m *portFixModel) Init() tea.Cmd {
-	return m.startScan()
-}
-
-// ─── Commands ───
-
-// startScan - run `show interface status | include err-dis` on all cisco devices
-func (m *portFixModel) startScan() tea.Cmd {
-	m.scanning = true
-	m.scanningDn = ""
-	m.scanErr = ""
-	devices := make([]config.DeviceConfig, 0)
-	for _, d := range m.devices {
+	var cisco []config.DeviceConfig
+	for _, d := range cfg.Devices {
 		if strings.EqualFold(d.Vendor, "cisco") {
-			devices = append(devices, d)
+			cisco = append(cisco, d)
 		}
 	}
-	if len(devices) == 0 {
-		m.scanning = false
-		m.scanErr = "no cisco devices in config"
-		return nil
-	}
-	return func() tea.Msg {
-		return scanMsg{devices: devices}
+	return &portFixModel{
+		cfg:    cfg,
+		picker: NewDevicePicker(cisco, "Port Fix — select switches"),
 	}
 }
 
-// runPortFix - execute clear + bounce on all ports of a device
-func (m *portFixModel) runPortFix(ctx context.Context, d config.DeviceConfig) tea.Cmd {
-	m.clearing = true
-	return func() tea.Msg {
-		return fixDoneMsg{device: d, err: m.fixDevice(ctx, d)}
-	}
-}
-
-// ─── Messages ───
-
-type scanMsg struct {
-	devices []config.DeviceConfig
-}
-
-type fixDoneMsg struct {
-	device config.DeviceConfig
-	err    error
-}
-
-type portScanMsg struct {
-	device  config.DeviceConfig
-	output  string
-	err     error
-	ports   []PortFixStatus
-}
-
-// ─── Update ───
+func (m *portFixModel) Init() tea.Cmd { return nil }
 
 func (m *portFixModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "b":
+		if m.running {
+			if msg.String() == "esc" || msg.String() == "q" {
+				return m, backToMenu()
+			}
+			return m, nil
+		}
+		handled, back, confirm := m.picker.HandleKey(msg)
+		if back {
 			return m, backToMenu()
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.cursor < len(m.devices)-1 {
-				m.cursor++
-			}
-		case "enter":
-			if !m.scanning && !m.clearing {
-				d := m.devices[m.cursor]
-				return m, m.runPortFix(context.Background(), d)
-			}
-		case "r":
-			// re-scan
-			return m, m.startScan()
 		}
-	case scanMsg:
-		m.scanning = true
-		var cmds []tea.Cmd
-		for _, d := range msg.devices {
-			d := d
-			cmds = append(cmds, func() tea.Msg {
-				return portScanMsg{device: d, output: "", err: nil}
-			})
+		if confirm {
+			sel := m.picker.SelectedDevices()
+			if len(sel) == 0 {
+				return m, nil
+			}
+			m.running = true
+			m.done = false
+			m.results = nil
+			return m, tea.Batch(m.runFix(sel), spinnerCmd())
 		}
-		return m, tea.Batch(cmds...)
-	case portScanMsg:
-		// simulate scan: for now, show device as scanned
-		m.results[msg.device.Name] = &PortFixDevice{
-			Device: msg.device,
-			Done:   true,
+		if handled {
+			return m, nil
 		}
-		m.scanningDn = msg.device.Name
-		m.checkScanDone()
+	case taskDoneMsg:
+		m.running = false
+		m.done = true
+		m.results = msg.results
 		return m, nil
-	case fixDoneMsg:
-		m.clearing = false
-		if msg.err != nil {
-			if pf, ok := m.results[msg.device.Name]; ok {
-				pf.Err = msg.err.Error()
-			}
-			m.lastMsg = errStyle.Render(fmt.Sprintf("%s: %v", msg.device.Name, msg.err))
-		} else {
-			m.lastMsg = okStyle.Render(fmt.Sprintf("%s: ports fixed", msg.device.Name))
-			m.fixedCount++
+	case spinnerTick:
+		spinnerIndex++
+		if m.running {
+			return m, spinnerCmd()
 		}
 		return m, nil
 	}
 	return m, nil
 }
 
-func (m *portFixModel) checkScanDone() {
-	// count scanned devices
-	done := 0
-	for _, d := range m.devices {
-		if strings.EqualFold(d.Vendor, "cisco") {
-			if _, ok := m.results[d.Name]; ok {
-				done++
-			}
-		}
-	}
-	total := 0
-	for _, d := range m.devices {
-		if strings.EqualFold(d.Vendor, "cisco") {
-			total++
-		}
-	}
-	if done >= total && total > 0 {
-		m.scanning = false
-	}
-}
-
-// fixDevice - real logic: clear port-security + bounce
-func (m *portFixModel) fixDevice(ctx context.Context, d config.DeviceConfig) error {
-	cred, err := m.cfg.GetCredential(d.Credential)
+// fixDevice - clear port-security sticky + bounce, verify up
+func fixDevice(ctx context.Context, d config.DeviceConfig, cfg *config.Config) (string, error) {
+	cred, err := cfg.GetCredential(d.Credential)
 	if err != nil {
-		return fmt.Errorf("get credential: %w", err)
+		return "", fmt.Errorf("get credential: %w", err)
 	}
-	dev, err := device.NewDevice(d, cred, m.cfg)
+	dev, err := device.NewDevice(d, cred, cfg)
 	if err != nil {
-		return fmt.Errorf("create device: %w", err)
+		return "", fmt.Errorf("create device: %w", err)
 	}
 
 	// 1. find err-disabled ports
 	out, err := dev.RunCommand("show interface status | include err-dis")
 	if err != nil {
-		return fmt.Errorf("scan: %w", err)
+		return "", fmt.Errorf("scan: %w", err)
 	}
 	ports := parseErrDisabledPorts(out)
 	if len(ports) == 0 {
-		return fmt.Errorf("no err-disabled ports found")
+		return "", fmt.Errorf("no err-disabled ports found")
 	}
 
-	// 2. clear + bounce each port
+	// 2. clear + bounce each port, then verify
+	var fixed []string
+	var failed []string
 	for _, p := range ports {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return "", ctx.Err()
 		}
 		// clear port-security sticky (exec mode)
-		_, _ = dev.RunCommand(fmt.Sprintf("clear port-security sticky interface %s", p))
+		if _, err := dev.RunCommand(fmt.Sprintf("clear port-security sticky interface %s", p)); err != nil {
+			failed = append(failed, p+": clear failed")
+			continue
+		}
 		// bounce
-		_, _ = dev.RunCommands([]string{
+		if _, err := dev.RunCommands([]string{
 			fmt.Sprintf("interface %s", p),
 			"shutdown",
 			"no shutdown",
-		})
+		}); err != nil {
+			failed = append(failed, p+": bounce failed")
+			continue
+		}
 		time.Sleep(1 * time.Second)
+		// verify
+		ver, err := dev.RunCommand(fmt.Sprintf("show interface %s", p))
+		if err == nil && strings.Contains(ver, "up") && !strings.Contains(ver, "down") {
+			fixed = append(fixed, p)
+		} else {
+			failed = append(failed, p+": verify failed")
+		}
 	}
-	return nil
+
+	summary := fmt.Sprintf("fixed %d/%d ports: %s", len(fixed), len(fixed)+len(failed), strings.Join(fixed, ", "))
+	if len(failed) > 0 {
+		return summary, fmt.Errorf("failed: %s", strings.Join(failed, "; "))
+	}
+	return summary, nil
+}
+
+func (m *portFixModel) runFix(devices []config.DeviceConfig) tea.Cmd {
+	return RunTaskOnDevices(context.Background(), m.cfg, devices, fixDevice)
+}
+
+func (m *portFixModel) View() string {
+	if m.running {
+		return titleStyle.Render(" Port Fix ") + "\n\n" +
+			dimStyle.Render("Fixing err-disabled ports...") + "\n" +
+			spinner() + "\n\n" +
+			dimStyle.Render("esc to cancel")
+	}
+	if m.done {
+		var b strings.Builder
+		b.WriteString(titleStyle.Render(" Port Fix Results ") + "\n\n")
+		ok, fail := 0, 0
+		for _, r := range m.results {
+			if r.err != nil {
+				fail++
+				b.WriteString(fmt.Sprintf("  %s %s — %s (%s)\n", errStyle.Render("✗"), deviceStyle.Render(r.name), r.err.Error(), dimStyle.Render(r.status)))
+			} else {
+				ok++
+				b.WriteString(fmt.Sprintf("  %s %s — %s\n", okStyle.Render("✓"), deviceStyle.Render(r.name), r.status))
+			}
+		}
+		b.WriteString("\n" + fmt.Sprintf("%s %d ok · %s %d failed",
+			okStyle.Render("✓"), ok, errStyle.Render("✗"), fail))
+		b.WriteString("\n\n" + dimStyle.Render("esc/b back · r re-run"))
+		return b.String()
+	}
+	return m.picker.View()
 }
 
 // ─── Parsing ───
@@ -240,46 +186,3 @@ func parseErrDisabledPorts(output string) []string {
 	}
 	return ports
 }
-
-// ─── View ───
-
-func (m *portFixModel) View() string {
-	var b string
-	b += titleStyle.Render(" Port Fix ") + "\n\n"
-
-	if m.scanning {
-		b += "Scanning for err-disabled ports...\n"
-	} else if m.scanErr != "" {
-		b += errStyle.Render(m.scanErr) + "\n"
-	} else {
-		for i, d := range m.devices {
-			if !strings.EqualFold(d.Vendor, "cisco") {
-				continue
-			}
-			cursor := "  "
-			style := dimStyle
-			if i == m.cursor {
-				cursor = "▸ "
-				style = titleStyle
-			}
-			status := "…"
-			if pf, ok := m.results[d.Name]; ok {
-				if pf.Err != "" {
-					status = errStyle.Render("✗")
-				} else if pf.Done {
-					status = okStyle.Render("✓")
-				}
-			}
-			b += fmt.Sprintf("%s %s %s\n", cursor, style.Render(d.Name), status)
-		}
-	}
-
-	if m.lastMsg != "" {
-		b += "\n" + m.lastMsg + "\n"
-	}
-
-	b += "\n" + dimStyle.Render("↑/↓ nav · enter fix · r rescan · q back")
-	return b
-}
-
-var _ = logger.Info

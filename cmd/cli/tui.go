@@ -100,6 +100,7 @@ func newMenuModel(cfg *config.Config) *MenuModel {
 		label string
 		make  func() tea.Model
 	}{
+		{"📊 Overview", func() tea.Model { return newOverviewModel(cfg) }},
 		{"🖧 Device list", func() tea.Model { return newDeviceListModel(cfg) }},
 		{"🔧 Port fix", func() tea.Model { return newPortFixModel(cfg) }},
 		{"⚡ Quick exec", func() tea.Model { return newQuickExecModel(cfg) }},
@@ -169,10 +170,6 @@ func (m stubModel) View() string {
 		dimStyle.Render("Coming soon — use CLI mode for now: netmon "+m.title) + "\n\n" +
 		dimStyle.Render("esc/b to go back")
 }
-
-func newQuickExecModel(cfg *config.Config) tea.Model { return stubModel{title: "quick-exec"} }
-func newBackupModel(cfg *config.Config) tea.Model    { return stubModel{title: "backup"} }
-func newMonitorModel(cfg *config.Config) tea.Model   { return stubModel{title: "monitor"} }
 
 // ─── Helpers ───
 
