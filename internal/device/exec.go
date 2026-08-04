@@ -125,6 +125,7 @@ func isShowCommand(cmd string) bool {
 		"ping",
 		"traceroute",
 		"write memory",
+		"clear",
 	}
 
 	for _, prefix := range showPrefixes {
