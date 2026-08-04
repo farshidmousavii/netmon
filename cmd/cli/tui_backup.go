@@ -20,10 +20,9 @@ type backupModel struct {
 }
 
 func newBackupModel(cfg *config.Config) *backupModel {
-	return &backupModel{
-		cfg:    cfg,
-		picker: NewDevicePicker(cfg.Devices, "Backup Devices"),
-	}
+	m := &backupModel{cfg: cfg, picker: NewDevicePicker(cfg.Devices, "Backup Devices")}
+	m.picker.Confirm = "backup"
+	return m
 }
 
 func (m *backupModel) Init() tea.Cmd { return nil }
@@ -37,6 +36,9 @@ func (m *backupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if msg.String() == "?" {
+			return m, switchTo(helpModel{parent: m, keys: pickerHelpKeys})
+		}
 		handled, back, confirm := m.picker.HandleKey(msg)
 		if back {
 			return m, backToMenu()
@@ -49,7 +51,7 @@ func (m *backupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.running = true
 			m.done = false
 			m.results = nil
-			return m, m.runBackup(sel)
+			return m, tea.Batch(m.runBackup(sel), spinnerCmd())
 		}
 		if handled {
 			return m, nil
@@ -83,10 +85,12 @@ func (m *backupModel) runBackup(devices []config.DeviceConfig) tea.Cmd {
 
 func (m *backupModel) View() string {
 	if m.running {
-		return titleStyle.Render(" Backup ") + "\n\n" +
-			dimStyle.Render("Running backup...") + "\n" +
-			spinner() + "\n\n" +
-			dimStyle.Render("esc to cancel")
+		var b strings.Builder
+		b.WriteString(titleStyle.Render(" Backup ") + "\n\n")
+		b.WriteString(dimStyle.Render("Backing up "+fmt.Sprint(len(m.results))+"/"+fmt.Sprint(len(m.picker.SelectedDevices()))+" ...") + "\n")
+		b.WriteString(spinner() + "\n")
+		b.WriteString("\n" + renderFooter("esc", "cancel"))
+		return b.String()
 	}
 	if m.done {
 		var b strings.Builder
@@ -95,7 +99,7 @@ func (m *backupModel) View() string {
 		for _, r := range m.results {
 			if r.err != nil {
 				fail++
-				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), r.err.Error()))
+				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), errStyle.Render(r.err.Error())))
 			} else {
 				ok++
 				b.WriteString(fmt.Sprintf("  %s %s → %s\n", okStyle.Render("✓"), deviceStyle.Render(r.name), dimStyle.Render(r.status)))
@@ -103,16 +107,15 @@ func (m *backupModel) View() string {
 		}
 		b.WriteString("\n" + fmt.Sprintf("%s %d ok · %s %d failed",
 			okStyle.Render("✓"), ok, errStyle.Render("✗"), fail))
-		b.WriteString("\n\n" + dimStyle.Render("esc/b back · r re-run"))
+		b.WriteString("\n" + renderFooter("esc/b", "back", "r", "re-run"))
 		return b.String()
 	}
 	return m.picker.View()
 }
 
-// spinner - simple animation frames
+// spinner - simple animation frames (braille)
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// spinnerIndex - current frame (rotated on spinnerTick)
 var spinnerIndex int
 
 func spinner() string {

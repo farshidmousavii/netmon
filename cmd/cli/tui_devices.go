@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/farshidmousavii/netmon/internal/config"
 )
 
@@ -103,18 +104,19 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m deviceListModel) View() string {
-	var b string
-	b += titleStyle.Render(" Device List ") + "\n"
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(" Device List ") + "\n\n")
 
 	// header
-	header := fmt.Sprintf("%-20s %-16s %-10s", "NAME", "IP", "VENDOR")
-	b += dimStyle.Render(header) + "\n"
-	b += dimStyle.Render(strings.Repeat("─", 50)) + "\n"
+	b.WriteString(dimStyle.Render(fmt.Sprintf("%-2s %-22s %-16s %-10s", "", "NAME", "IP", "VENDOR")) + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("─", 52)) + "\n")
 
 	if m.loading {
-		b += "Loading...\n"
+		b.WriteString(dimStyle.Render("Loading...\n"))
 	} else if m.err != nil {
-		b += errStyle.Render("Error: "+m.err.Error()) + "\n"
+		b.WriteString(errStyle.Render("Error: "+m.err.Error()) + "\n")
+	} else if len(m.filtered) == 0 {
+		b.WriteString(dimStyle.Render("No devices match.\n"))
 	} else {
 		start := m.offset
 		end := start + m.pageSize
@@ -125,26 +127,35 @@ func (m deviceListModel) View() string {
 			start = 0
 		}
 
+		// fixed-width columns (lipgloss Width handles ANSI)
+		nameCol := lipgloss.NewStyle().Width(22)
+		ipCol := lipgloss.NewStyle().Width(16)
+		vendorCol := lipgloss.NewStyle().Width(10)
+
 		for i := start; i < end; i++ {
 			d := m.filtered[i]
 			cursor := "  "
 			style := dimStyle
 			if i == m.cursor {
 				cursor = "▸ "
-				style = titleStyle
+				style = accStyle
 			}
-			b += cursor + style.Render(fmt.Sprintf("%-20s %-16s %-10s", d.Name, d.IP, d.Vendor)) + "\n"
+			b.WriteString(fmt.Sprintf("%s %s%s%s\n",
+				cursor,
+				nameCol.Render(style.Render(d.Name)),
+				ipCol.Render(style.Render(d.IP)),
+				vendorCol.Render(style.Render(d.Vendor))))
 		}
 	}
 
-	// footer with pagination + filter hint
 	total := len(m.filtered)
-	b += "\n" + dimStyle.Render(fmt.Sprintf("Page %d/%d · %d devices", m.offset/m.pageSize+1, max(1, (total+m.pageSize-1)/m.pageSize), total))
+	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Page %d/%d · %d devices",
+		m.offset/m.pageSize+1, max(1, (total+m.pageSize-1)/m.pageSize), total)))
 	if m.query != "" {
-		b += dimStyle.Render(fmt.Sprintf(" · filter: %q", m.query))
+		b.WriteString(dimStyle.Render(fmt.Sprintf(" · filter: %q", m.query)))
 	}
-	b += "\n" + dimStyle.Render("↑/↓ nav · ←/→ page · q back")
-	return b
+	b.WriteString("\n" + renderFooter("↑/↓", "nav", "←/→", "page", "/", "filter", "esc", "back"))
+	return b.String()
 }
 
 func max(a, b int) int {

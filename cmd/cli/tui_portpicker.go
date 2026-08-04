@@ -8,7 +8,8 @@ import (
 )
 
 // PortPicker - multi-select port list (err-disabled ports of one switch).
-// Keys: ↑/↓ nav, space toggle, a all, n none, enter confirm, esc back.
+// Keys: ↑/↓ nav, space toggle, a all, n none, g/G top/bottom,
+//       ? help, enter confirm, esc back.
 type PortPicker struct {
 	Ports    []string
 	Selected map[string]bool
@@ -53,6 +54,14 @@ func (p *PortPicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
 		if p.Cursor < len(p.Ports)-1 {
 			p.Cursor++
 		}
+	case "g", "home":
+		p.Cursor = 0
+		p.Offset = 0
+	case "G", "end":
+		if len(p.Ports) > 0 {
+			p.Cursor = len(p.Ports) - 1
+			p.Offset = max(0, len(p.Ports)-p.PageSize)
+		}
 	case " ":
 		if len(p.Ports) > 0 && p.Cursor < len(p.Ports) {
 			port := p.Ports[p.Cursor]
@@ -83,16 +92,32 @@ func (p *PortPicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
 	return true, false, false
 }
 
+var portPickerHelpKeys = [][2]string{
+	{"↑/k ↓/j", "navigate"},
+	{"space", "toggle select"},
+	{"a / n", "select all / none"},
+	{"←/→", "page"},
+	{"g / G", "top / bottom"},
+	{"enter", "fix selected"},
+	{"esc", "back"},
+}
+
 func (p *PortPicker) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" "+p.Title+" ") + "\n\n")
+
+	if len(p.Ports) == 0 {
+		b.WriteString(dimStyle.Render("No err-disabled ports found on this switch.\n\n"))
+		b.WriteString(renderFooter("esc", "back"))
+		return b.String()
+	}
 
 	start := p.Offset
 	end := start + p.PageSize
 	if end > len(p.Ports) {
 		end = len(p.Ports)
 	}
-	if start >= len(p.Ports) && len(p.Ports) > 0 {
+	if start >= len(p.Ports) {
 		start = 0
 	}
 
@@ -106,14 +131,17 @@ func (p *PortPicker) View() string {
 		style := dimStyle
 		if i == p.Cursor {
 			cursor = "▸ "
-			style = titleStyle
+			style = accStyle
 		}
-		b.WriteString(fmt.Sprintf("%s[%s] %s\n", cursor, check, style.Render(port)))
+		b.WriteString(fmt.Sprintf("%s %s %s\n", cursor, check, style.Render(port)))
 	}
 
 	total := len(p.Ports)
-	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Page %d/%d · %d ports · %d selected",
-		p.Offset/p.PageSize+1, max(1, (total+p.PageSize-1)/p.PageSize), total, p.CountSelected())))
-	b.WriteString("\n" + dimStyle.Render("space select · a all · n none · enter fix · esc back"))
+	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("%d/%d ports · %d selected",
+		len(p.SelectedPorts()), total, p.CountSelected())))
+
+	b.WriteString("\n" + renderFooter(
+		"space", "select", "a/n", "all/none", "enter", "fix",
+		"?", "help", "esc", "back"))
 	return b.String()
 }

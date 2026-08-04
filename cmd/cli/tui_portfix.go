@@ -289,28 +289,37 @@ func (m *portFixModel) View() string {
 	switch m.phase {
 	case phasePickPort:
 		if m.ppicker == nil {
-			return titleStyle.Render(" Port Fix ") + "\n\n" +
-				dimStyle.Render("Scanning ports...") + "\n" +
-				spinner() + "\n\n" +
-				dimStyle.Render("esc to cancel")
+			var b strings.Builder
+			b.WriteString(titleStyle.Render(" Port Fix ") + "\n\n")
+			b.WriteString(dimStyle.Render("Scanning for err-disabled ports...") + "\n")
+			b.WriteString(spinner() + "\n")
+			b.WriteString("\n" + renderFooter("esc", "cancel"))
+			return b.String()
 		}
 		return m.ppicker.View()
 	case phaseRunning:
-		return titleStyle.Render(" Port Fix ") + "\n\n" +
-			dimStyle.Render("Fixing ports...") + "\n" +
-			spinner() + "\n\n" +
-			dimStyle.Render("esc to cancel")
+		var b strings.Builder
+		b.WriteString(titleStyle.Render(" Port Fix ") + "\n\n")
+		b.WriteString(dimStyle.Render("Fixing ports...") + "\n")
+		b.WriteString(spinner() + "\n")
+		b.WriteString("\n" + renderFooter("esc", "cancel"))
+		return b.String()
 	case phaseDone:
 		var b strings.Builder
 		b.WriteString(titleStyle.Render(" Port Fix Results ") + "\n\n")
+		ok, fail := 0, 0
 		for _, r := range m.results {
 			if r.err != nil {
-				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), r.err.Error()))
+				fail++
+				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), errStyle.Render(r.err.Error())))
 			} else {
-				b.WriteString(fmt.Sprintf("  %s %s — %s\n", okStyle.Render("✓"), deviceStyle.Render(r.name), r.status))
+				ok++
+				b.WriteString(fmt.Sprintf("  %s %s — %s\n", okStyle.Render("✓"), deviceStyle.Render(r.name), dimStyle.Render(r.status)))
 			}
 		}
-		b.WriteString("\n" + dimStyle.Render("esc/b back · r re-run"))
+		b.WriteString("\n" + fmt.Sprintf("%s %d ok · %s %d failed",
+			okStyle.Render("✓"), ok, errStyle.Render("✗"), fail))
+		b.WriteString("\n" + renderFooter("esc/b", "back", "r", "re-run"))
 		return b.String()
 	default:
 		return m.picker.View()

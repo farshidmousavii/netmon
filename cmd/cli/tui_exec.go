@@ -123,26 +123,30 @@ func (m *quickExecModel) runExec(devices []config.DeviceConfig, cmd string) tea.
 func (m *quickExecModel) View() string {
 	switch m.mode {
 	case "input":
-		return titleStyle.Render(" Quick Exec — command ") + "\n\n" +
-			dimStyle.Render(fmt.Sprintf("devices: %d selected\n\n", len(m.picker.SelectedDevices()))) +
-			titleStyle.Render("> "+m.input+"▌") + "\n\n" +
-			dimStyle.Render("enter run · esc back")
+		var b strings.Builder
+		b.WriteString(titleStyle.Render(" Quick Exec ") + "\n\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("%d device(s) selected\n\n", len(m.picker.SelectedDevices()))))
+		b.WriteString(accStyle.Render("> "+m.input+"▌") + "\n\n")
+		b.WriteString(renderFooter("enter", "run", "esc", "back"))
+		return b.String()
 	case "running":
-		return titleStyle.Render(" Quick Exec ") + "\n\n" +
-			dimStyle.Render("Running command...") + "\n" +
-			spinner() + "\n\n" +
-			dimStyle.Render("esc to cancel")
+		var b strings.Builder
+		b.WriteString(titleStyle.Render(" Quick Exec ") + "\n\n")
+		b.WriteString(dimStyle.Render("Running command...") + "\n")
+		b.WriteString(spinner() + "\n")
+		b.WriteString("\n" + renderFooter("esc", "cancel"))
+		return b.String()
 	case "done":
 		var b strings.Builder
 		b.WriteString(titleStyle.Render(" Quick Exec Results ") + "\n\n")
 		for _, r := range m.results {
 			if r.err != nil {
-				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), r.err.Error()))
+				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), errStyle.Render(r.err.Error())))
 			} else {
 				b.WriteString(fmt.Sprintf("  %s %s\n%s\n\n", okStyle.Render("✓"), deviceStyle.Render(r.name), dimStyle.Render(r.status)))
 			}
 		}
-		b.WriteString(dimStyle.Render("esc/b back · r re-run"))
+		b.WriteString(renderFooter("esc/b", "back", "r", "re-run"))
 		return b.String()
 	default:
 		return m.picker.View()

@@ -72,16 +72,17 @@ func (m *overviewModel) runCheck() tea.Cmd {
 
 func (m *overviewModel) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(" Overview — Network Health ") + "\n\n")
+	b.WriteString(titleStyle.Render(" Overview ") + "\n\n")
 
 	if m.running {
 		b.WriteString(dimStyle.Render("Scanning all devices...") + "\n" + spinner() + "\n")
+		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	}
 
 	if len(overviewState.results) == 0 {
-		b.WriteString(dimStyle.Render("No data yet. Press enter/r to run a full health check.\n\n"))
-		b.WriteString(dimStyle.Render("esc/b back"))
+		b.WriteString(dimStyle.Render("No data yet. Press enter to run a full health check.\n\n"))
+		b.WriteString(renderFooter("enter", "check", "esc", "back"))
 		return b.String()
 	}
 
@@ -104,7 +105,6 @@ func (m *overviewModel) View() string {
 	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Total: %d · last check %s",
 		total, overviewState.at.Format("15:04:05"))))
 
-	// list failed/offline devices
 	var problems []taskResult
 	for _, r := range overviewState.results {
 		if r.err != nil || strings.Contains(r.status, "offline") {
@@ -112,16 +112,16 @@ func (m *overviewModel) View() string {
 		}
 	}
 	if len(problems) > 0 {
-		b.WriteString("\n\n" + sectionStyle.Render("Problem devices:") + "\n")
+		b.WriteString("\n\n" + sectionStyle.Render("Problem devices") + "\n")
 		for _, r := range problems {
 			if r.err != nil {
-				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), r.err.Error()))
+				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), errStyle.Render(r.err.Error())))
 			} else {
 				b.WriteString(fmt.Sprintf("  %s %s — offline\n", errStyle.Render("✗"), deviceStyle.Render(r.name)))
 			}
 		}
 	}
 
-	b.WriteString("\n\n" + dimStyle.Render("r/enter re-check · esc back"))
+	b.WriteString("\n" + renderFooter("r/enter", "re-check", "esc", "back"))
 	return b.String()
 }
