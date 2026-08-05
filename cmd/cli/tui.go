@@ -67,6 +67,16 @@ var (
 	// device name emphasis
 	deviceStyle = lipgloss.NewStyle().Bold(true).Foreground(colPrimary)
 	portStyle   = lipgloss.NewStyle().Bold(true).Foreground(colWarning)
+
+	// shell frame styles
+	frameStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colSubtle)
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colAccent)
+	statusBarStyle = lipgloss.NewStyle().
+			Foreground(colMuted)
 )
 
 // renderKey - format a key as highlighted hint
@@ -211,6 +221,10 @@ type ShellModel struct {
 	content  tea.Model
 	width    int
 	height   int
+	// breadcrumb trail (current location)
+	crumbDomain string
+	crumbItem   string
+	crumbScreen string
 }
 
 func newRootModel(cfg *config.Config) *ShellModel {
@@ -231,6 +245,9 @@ func (m *ShellModel) openItem() tea.Cmd {
 	if d := m.currentDomain(); d != nil && m.iCursor < len(d.items) {
 		m.content = d.items[m.iCursor].make()
 		m.focus = 1
+		m.crumbDomain = d.label
+		m.crumbItem = d.items[m.iCursor].label
+		m.crumbScreen = ""
 		return m.content.Init()
 	}
 	return nil
@@ -244,15 +261,34 @@ func (m ShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// nil = back to shell; model = nested screen (e.g. Device Details)
 			if v.model == nil {
 				m.content = nil
+				m.crumbScreen = ""
 			} else {
 				m.content = v.model
+				// breadcrumb for nested screens
+				switch v.model.(type) {
+				case *deviceDetailsModel:
+					m.crumbScreen = "Device Details"
+				case *switchDetailsModel:
+					m.crumbScreen = "Switch Details"
+				case *quickExecModel:
+					m.crumbScreen = "Quick Exec"
+				case *backupModel:
+					m.crumbScreen = "Backup"
+				case *portFixModel:
+					m.crumbScreen = "Port Fix"
+				default:
+					m.crumbScreen = ""
+				}
 				return m, m.content.Init()
 			}
 			return m, nil
 		case tea.KeyMsg:
 			k := v.String()
+			// global back: b/esc/q close the screen and return to nav
 			if k == "esc" || k == "q" || k == "b" {
+				// but q quits when at nav level... handled below
 				m.content = nil
+				m.crumbScreen = ""
 				return m, nil
 			}
 		}
@@ -359,44 +395,92 @@ var menuKeys = [][2]string{
 	{"q", "quit"},
 }
 
-// headerBar - banner + version + user
+// headerBar - banner + title + version + user, framed
 func (m ShellModel) headerBar() string {
 	var b strings.Builder
 	bannerStyle := lipgloss.NewStyle().Foreground(colPrimary).Bold(true)
 	for _, line := range banner {
 		b.WriteString(bannerStyle.Render(line) + "\n")
 	}
-	b.WriteString("\n")
+	// title row: Bidar v0.1 ... Connected as: admin
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Center,
+		headerStyle.Render(" Bidar v0.1 "),
+		dimStyle.Render(strings.Repeat(" ", max(0, m.width-40))),
+		dimStyle.Render("Connected as: admin "),
+	) + "\n")
 	return b.String()
 }
 
-// statusBar - bottom bar: context shortcuts left, global right
+// statusBar - bottom bar: global shortcuts, always the same everywhere
 func (m ShellModel) statusBar() string {
-	left := "↑/↓ nav · →/enter open · esc back"
-	right := "? help · q quit"
-	barStyle := lipgloss.NewStyle().Foreground(colMuted).Background(colBg)
-	return barStyle.Render(" " + left + strings.Repeat(" ", max(0, m.width-len(left)-len(right)-2)) + right + " ")
+	left := renderKey("b") + dimStyle.Render(" back ") +
+		renderKey("r") + dimStyle.Render(" refresh ") +
+		renderKey("/") + dimStyle.Render(" search ") +
+		renderKey("?") + dimStyle.Render(" help ")
+	right := renderKey("q") + dimStyle.Render(" quit ")
+	bar := " " + left + strings.Repeat(" ", max(0, m.width-len(left)-len(right)-6)) + right
+	barStyle := lipgloss.NewStyle().
+		Foreground(colText).
+		Background(colBg).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colSubtle)
+	return barStyle.Render(bar)
+}
+
+// frame - wrap content in a rounded border box
+func (m ShellModel) frame(inner string) string {
+	inner = strings.TrimSuffix(inner, "\n")
+	return frameStyle.Width(max(0, m.width-2)).Render(inner)
+}
+
+// breadcrumb - current location trail, e.g. "Modules / Assets / Devices"
+func (m ShellModel) breadcrumb() string {
+	parts := []string{"Modules"}
+	if m.crumbDomain != "" {
+		parts = append(parts, m.crumbDomain)
+	}
+	if m.crumbItem != "" {
+		parts = append(parts, m.crumbItem)
+	}
+	if m.crumbScreen != "" {
+		parts = append(parts, m.crumbScreen)
+	}
+	for i, p := range parts {
+		if i == len(parts)-1 {
+			parts[i] = accStyle.Render(p)
+		} else {
+			parts[i] = dimStyle.Render(p)
+		}
+	}
+	return strings.Join(parts, dimStyle.Render(" / "))
 }
 
 func (m ShellModel) View() string {
 	var b strings.Builder
 
-	// header
+	// header (always visible, framed)
 	b.WriteString(m.headerBar())
+	b.WriteString(strings.Repeat("─", max(0, m.width)) + "\n")
 
-	// if a content screen is open, show it full-width below header
+	// content screen active: full-width below header
 	if m.content != nil {
+		b.WriteString(" " + m.breadcrumb() + "\n")
+		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.width))) + "\n")
 		b.WriteString(m.content.View())
 		b.WriteString("\n" + m.statusBar())
 		return b.String()
 	}
 
-	// left nav column (always visible)
-	navWidth := 18
-	navStyle := lipgloss.NewStyle().Width(navWidth).Padding(0, 1)
+	// breadcrumb above the main frame
+	b.WriteString(" " + m.breadcrumb() + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.width))) + "\n")
 
-	var nav strings.Builder
-	nav.WriteString(dimStyle.Render(" MODULES ") + "\n\n")
+	// panels side by side with a vertical separator.
+	// Build nav column as plain lines (fixed width), then interleave.
+	navWidth := 20
+	var navLines []string
+	navLines = append(navLines, headerStyle.Render(" Modules "))
+	navLines = append(navLines, "")
 	for i, d := range domains {
 		style := dimStyle
 		marker := "  "
@@ -404,13 +488,14 @@ func (m ShellModel) View() string {
 			style = accStyle
 			marker = "▸ "
 		}
-		nav.WriteString(marker + style.Render(d.label) + "\n")
+		navLines = append(navLines, marker+style.Render(d.label))
 	}
 
-	// content panel: items of selected domain, or hint
-	var content strings.Builder
+	var contentLines []string
 	if d := m.currentDomain(); d != nil && len(d.items) > 0 {
-		content.WriteString(accStyle.Render(" "+d.label+" ") + "\n\n")
+		contentLines = append(contentLines, headerStyle.Render(" "+d.label+" "))
+		contentLines = append(contentLines, dimStyle.Render(strings.Repeat("─", max(0, m.width-navWidth-12))))
+		contentLines = append(contentLines, "")
 		for i, item := range d.items {
 			style := dimStyle
 			marker := "  "
@@ -418,23 +503,39 @@ func (m ShellModel) View() string {
 				style = accStyle
 				marker = "▸ "
 			}
-			content.WriteString(marker + style.Render(item.label) + "\n")
+			contentLines = append(contentLines, marker+style.Render(item.label))
 		}
 	} else if m.selected >= 0 {
-		content.WriteString(dimStyle.Render(" "+domains[m.selected].label+" — coming soon") + "\n")
+		contentLines = append(contentLines, headerStyle.Render(" "+domains[m.selected].label+" "))
+		contentLines = append(contentLines, dimStyle.Render(strings.Repeat("─", max(0, m.width-navWidth-12))))
+		contentLines = append(contentLines, "")
+		contentLines = append(contentLines, dimStyle.Render("  Coming soon"))
 	} else {
-		content.WriteString(dimStyle.Render("→ select a module") + "\n")
+		contentLines = append(contentLines, dimStyle.Render("→ select a module"))
 	}
 
-	// panels side by side
+	// pad shorter column so separator spans full height
+	for len(contentLines) < len(navLines) {
+		contentLines = append(contentLines, "")
+	}
+	for len(navLines) < len(contentLines) {
+		navLines = append(navLines, "")
+	}
+
+	leftStyle := dimStyle
 	if m.focus == 0 {
-		b.WriteString(accStyle.Render(navStyle.Render(nav.String())))
-	} else {
-		b.WriteString(dimStyle.Render(navStyle.Render(nav.String())))
+		leftStyle = accStyle
 	}
-	b.WriteString(content.String())
-
+	sep := dimStyle.Render("│")
+	var main strings.Builder
+	for i := range navLines {
+		main.WriteString(leftStyle.Render(lipgloss.NewStyle().Width(navWidth).Padding(0, 1).Render(navLines[i])))
+		main.WriteString(sep)
+		main.WriteString(contentLines[i] + "\n")
+	}
+	b.WriteString(m.frame(strings.TrimSuffix(main.String(), "\n")))
 	b.WriteString("\n" + m.statusBar())
+
 	return b.String()
 }
 

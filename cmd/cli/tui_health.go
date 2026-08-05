@@ -73,13 +73,11 @@ func (m *healthModel) View() string {
 
 	if m.running {
 		b.WriteString(dimStyle.Render("Scanning all devices...") + "\n" + spinner() + "\n")
-		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	}
 
 	if len(overviewState.results) == 0 {
 		b.WriteString(dimStyle.Render("No health data yet. Press enter to run a full check.\n\n"))
-		b.WriteString(renderFooter("enter", "check", "esc", "back"))
 		return b.String()
 	}
 
@@ -132,6 +130,5 @@ func (m *healthModel) View() string {
 		}
 	}
 
-	b.WriteString("\n" + renderFooter("r/enter", "re-check", "esc", "back"))
 	return b.String()
 }

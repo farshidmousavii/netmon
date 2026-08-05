@@ -343,7 +343,6 @@ func (m deviceListModel) View() string {
 		if m.formErr != "" {
 			b.WriteString("\n" + errStyle.Render("✗ "+m.formErr) + "\n")
 		}
-		b.WriteString("\n" + renderFooter("tab/enter", "next · save", "shift+tab", "prev", "esc", "cancel"))
 		return b.String()
 	}
 
@@ -354,7 +353,6 @@ func (m deviceListModel) View() string {
 			name = m.filtered[m.cursor].Name
 		}
 		b.WriteString(warnStyle.Render("Delete device "+name+"? This edits config.yaml (backup saved).") + "\n\n")
-		b.WriteString(renderFooter("y", "delete", "n/esc", "cancel"))
 		return b.String()
 	}
 
@@ -411,7 +409,6 @@ func (m deviceListModel) View() string {
 	if m.query != "" {
 		b.WriteString(dimStyle.Render(fmt.Sprintf(" · filter: %q", m.query)))
 	}
-	b.WriteString("\n" + renderFooter("↑/↓", "nav", "←/→", "page", "/", "filter", "a", "add", "e", "edit", "d", "del", "esc", "back"))
 	return b.String()
 }
 

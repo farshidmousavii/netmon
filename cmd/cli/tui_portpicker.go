@@ -128,7 +128,6 @@ func (p *PortPicker) View() string {
 
 	if len(p.Ports) == 0 {
 		b.WriteString(dimStyle.Render("No err-disabled ports found on this switch.\n\n"))
-		b.WriteString(renderFooter("esc", "back"))
 		return b.String()
 	}
 
@@ -160,8 +159,5 @@ func (p *PortPicker) View() string {
 	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("%d/%d ports · %d selected",
 		len(p.SelectedPorts()), total, p.CountSelected())))
 
-	b.WriteString("\n" + renderFooter(
-		"space", "select", "a/n", "all/none", "enter", "fix",
-		"?", "help", "esc", "back"))
 	return b.String()
 }

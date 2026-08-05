@@ -330,7 +330,6 @@ func (m *portFixModel) View() string {
 			b.WriteString(titleStyle.Render(" Port Fix ") + "\n\n")
 			b.WriteString(dimStyle.Render("Scanning for err-disabled ports...") + "\n")
 			b.WriteString(spinner() + "\n")
-			b.WriteString("\n" + renderFooter("esc", "cancel"))
 			return b.String()
 		}
 		return m.ppicker.View()
@@ -347,7 +346,6 @@ func (m *portFixModel) View() string {
 		for _, line := range m.log[start:] {
 			b.WriteString(line + "\n")
 		}
-		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	case phaseDone:
 		var b strings.Builder
@@ -364,7 +362,6 @@ func (m *portFixModel) View() string {
 		}
 		b.WriteString("\n" + fmt.Sprintf("%s %d ok · %s %d failed",
 			okStyle.Render("✓"), ok, errStyle.Render("✗"), fail))
-		b.WriteString("\n" + renderFooter("esc/b", "back", "r", "re-run"))
 		return b.String()
 	default:
 		return m.picker.View()

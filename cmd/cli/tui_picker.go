@@ -197,7 +197,6 @@ func (p *DevicePicker) View() string {
 	filtered := p.Filtered()
 	if len(filtered) == 0 {
 		b.WriteString(dimStyle.Render("No devices match. Clear filter with / + backspace.\n\n"))
-		b.WriteString(renderFooter("esc", "back"))
 		return b.String()
 	}
 
@@ -246,8 +245,5 @@ func (p *DevicePicker) View() string {
 		b.WriteString(dimStyle.Render(fmt.Sprintf(" · filter: %q", p.Query)))
 	}
 
-	b.WriteString("\n" + renderFooter(
-		"space", "select", "a/n", "all/none", "/", "filter",
-		"enter", p.Confirm, "?", "help", "esc", "back"))
 	return b.String()
 }

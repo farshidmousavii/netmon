@@ -97,7 +97,6 @@ func (m *monitorModel) View() string {
 		b.WriteString(titleStyle.Render(" Monitor ") + "\n\n")
 		b.WriteString(dimStyle.Render("Checking "+fmt.Sprint(len(m.picker.SelectedDevices()))+" devices...") + "\n")
 		b.WriteString(spinner() + "\n")
-		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	}
 	if m.done {
@@ -119,7 +118,6 @@ func (m *monitorModel) View() string {
 		}
 		b.WriteString("\n" + fmt.Sprintf("%s %d online · %s %d offline · %s %d failed",
 			okStyle.Render("✓"), online, errStyle.Render("✗"), offline, warnStyle.Render("?"), fail))
-		b.WriteString("\n" + renderFooter("esc/b", "back", "r", "re-run"))
 		return b.String()
 	}
 	return m.picker.View()

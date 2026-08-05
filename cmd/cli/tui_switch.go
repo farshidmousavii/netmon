@@ -150,17 +150,14 @@ func (m *switchDetailsModel) View() string {
 
 	if m.loading {
 		b.WriteString(dimStyle.Render("Loading interfaces...") + "\n" + spinner() + "\n")
-		b.WriteString("\n" + renderFooter("esc", "back"))
 		return b.String()
 	}
 	if m.err != nil {
 		b.WriteString(errStyle.Render("✗ "+m.err.Error()) + "\n\n")
-		b.WriteString(renderFooter("r", "retry", "esc", "back"))
 		return b.String()
 	}
 	if len(m.rows) == 0 {
 		b.WriteString(dimStyle.Render("No interfaces found.\n\n"))
-		b.WriteString(renderFooter("r", "refresh", "esc", "back"))
 		return b.String()
 	}
 
@@ -195,6 +192,5 @@ func (m *switchDetailsModel) View() string {
 			textStyle.Render(r.kind)))
 	}
 
-	b.WriteString("\n" + renderFooter("r", "refresh", "esc", "back"))
 	return b.String()
 }

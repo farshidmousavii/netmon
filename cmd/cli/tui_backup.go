@@ -89,7 +89,6 @@ func (m *backupModel) View() string {
 		b.WriteString(titleStyle.Render(" Backup ") + "\n\n")
 		b.WriteString(dimStyle.Render("Backing up "+fmt.Sprint(len(m.results))+"/"+fmt.Sprint(len(m.picker.SelectedDevices()))+" ...") + "\n")
 		b.WriteString(spinner() + "\n")
-		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	}
 	if m.done {
@@ -107,7 +106,6 @@ func (m *backupModel) View() string {
 		}
 		b.WriteString("\n" + fmt.Sprintf("%s %d ok · %s %d failed",
 			okStyle.Render("✓"), ok, errStyle.Render("✗"), fail))
-		b.WriteString("\n" + renderFooter("esc/b", "back", "r", "re-run"))
 		return b.String()
 	}
 	return m.picker.View()

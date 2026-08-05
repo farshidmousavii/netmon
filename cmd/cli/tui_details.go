@@ -105,6 +105,5 @@ func (m *deviceDetailsModel) View() string {
 			textStyle.Render(r[1])))
 	}
 
-	b.WriteString("\n" + renderFooter("r", "re-check", "e", "exec", "b", "backup", "esc", "back"))
 	return b.String()
 }

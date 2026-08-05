@@ -150,14 +150,12 @@ func (m *quickExecModel) View() string {
 		b.WriteString(titleStyle.Render(" Quick Exec ") + "\n\n")
 		b.WriteString(dimStyle.Render(fmt.Sprintf("%d device(s) selected\n\n", len(m.picker.SelectedDevices()))))
 		b.WriteString(accStyle.Render("> "+m.input+"▌") + "\n\n")
-		b.WriteString(renderFooter("enter", "run", "esc", "back"))
 		return b.String()
 	case "running":
 		var b strings.Builder
 		b.WriteString(titleStyle.Render(" Quick Exec ") + "\n\n")
 		b.WriteString(dimStyle.Render("Running command...") + "\n")
 		b.WriteString(spinner() + "\n")
-		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	case "done":
 		var b strings.Builder
@@ -188,7 +186,6 @@ func (m *quickExecModel) View() string {
 		if len(m.results) > 20 || m.scroll > 0 {
 			b.WriteString(dimStyle.Render(fmt.Sprintf("scroll %d · ", m.scroll)))
 		}
-		b.WriteString(renderFooter("↑/↓", "scroll", "esc/b", "back", "r", "re-run"))
 		return b.String()
 	default:
 		return m.picker.View()
