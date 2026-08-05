@@ -117,10 +117,14 @@ func (m helpModel) View() string {
 
 // runTUIEngine - main entry for TUI mode
 func runTUIEngine(ctx context.Context, cfg *config.Config) error {
-	p := tea.NewProgram(newRootModel(cfg), tea.WithAltScreen(), tea.WithContext(ctx))
-	_, err := p.Run()
+	tuiProgram = tea.NewProgram(newRootModel(cfg), tea.WithAltScreen(), tea.WithContext(ctx))
+	_, err := tuiProgram.Run()
 	return err
 }
+
+// tuiProgram - active bubbletea program, used to stream progress messages
+// from worker goroutines (port fix steps) into the event loop.
+var tuiProgram *tea.Program
 
 // ─── Root model ───
 

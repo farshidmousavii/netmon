@@ -28,6 +28,7 @@ type portFixModel struct {
 	ppicker *PortPicker
 	phase   fixPhase
 	results []taskResult
+	log     []string // live progress log
 }
 
 func newPortFixModel(cfg *config.Config) *portFixModel {
@@ -96,6 +97,7 @@ func (m *portFixModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.phase = phaseRunning
 				m.results = nil
+				m.log = nil
 				dev := m.picker.SelectedDevices()[0]
 				return m, tea.Batch(m.runFix(dev, ports), spinnerCmd())
 			}
@@ -113,6 +115,7 @@ func (m *portFixModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				m.phase = phasePickSwitch
 				m.results = nil
+				m.log = nil
 				return m, nil
 			}
 		}
@@ -123,6 +126,9 @@ func (m *portFixModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = phasePickSwitch
 			return m, nil
 		}
+		return m, nil
+	case fixStepMsg:
+		m.log = append(m.log, msg.line)
 		return m, nil
 	case taskDoneMsg:
 		m.phase = phaseDone
@@ -143,6 +149,11 @@ type portScanMsg struct {
 	device string
 	ports  []string
 	err    error
+}
+
+// fixStepMsg - one progress line emitted during port fix
+type fixStepMsg struct {
+	line string
 }
 
 func (m *portFixModel) scanPorts(d config.DeviceConfig) tea.Cmd {
@@ -215,7 +226,8 @@ func findPortForMac(output, mac string) string {
 
 // fixPorts - clear ONLY the sticky port holding the violating MAC,
 // then bounce selected ports. If MAC not found -> error, user decides.
-func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, ports []string) (string, error) {
+// step callback receives a progress line per action.
+func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, ports []string, step func(string)) (string, error) {
 	cred, err := cfg.GetCredential(d.Credential)
 	if err != nil {
 		return "", fmt.Errorf("get credential: %w", err)
@@ -233,42 +245,54 @@ func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, po
 			return "", ctx.Err()
 		}
 
+		step(fmt.Sprintf("→ %s: finding sticky port for violating MAC...", p))
+
 		// find the interface holding the violating MAC (port move 1->2 case)
 		stickyPort, err := findStickyPort(dev, p)
 		if err != nil {
 			failed = append(failed, p+": find sticky failed: "+err.Error())
+			step(fmt.Sprintf("  ✗ %s: find sticky failed: %v", p, err))
 			continue
 		}
 
 		if stickyPort == "" {
 			// cannot determine -> safety: refuse, ask user
 			failed = append(failed, p+": cannot find violating MAC (sticky port unknown)")
+			step(fmt.Sprintf("  ✗ %s: cannot find violating MAC (sticky port unknown)", p))
 			continue
 		}
+		step(fmt.Sprintf("  ✓ sticky port = %s", stickyPort))
 
 		// clear ONLY that sticky interface
+		step(fmt.Sprintf("  → clear port-security sticky interface %s", stickyPort))
 		if _, err := dev.RunCommand(fmt.Sprintf("clear port-security sticky interface %s", stickyPort)); err != nil {
 			failed = append(failed, p+": clear sticky "+stickyPort+" failed")
+			step(fmt.Sprintf("  ✗ %s: clear sticky %s failed: %v", p, stickyPort, err))
 			continue
 		}
 
 		// bounce the selected port
+		step(fmt.Sprintf("  → bounce %s (shutdown / no shutdown)", p))
 		if _, err := dev.RunCommands([]string{
 			fmt.Sprintf("interface %s", p),
 			"shutdown",
 			"no shutdown",
 		}); err != nil {
 			failed = append(failed, p+": bounce failed")
+			step(fmt.Sprintf("  ✗ %s: bounce failed: %v", p, err))
 			continue
 		}
 		time.Sleep(1 * time.Second)
 
 		// verify up
+		step(fmt.Sprintf("  → verify %s up...", p))
 		ver, err := dev.RunCommand(fmt.Sprintf("show interface %s", p))
 		if err == nil && strings.Contains(ver, "up") && !strings.Contains(ver, "down") {
 			fixed = append(fixed, p)
+			step(fmt.Sprintf("  ✓ %s up", p))
 		} else {
 			failed = append(failed, p+": verify failed")
+			step(fmt.Sprintf("  ✗ %s: verify failed", p))
 		}
 	}
 
@@ -280,9 +304,21 @@ func fixPorts(ctx context.Context, d config.DeviceConfig, cfg *config.Config, po
 }
 
 func (m *portFixModel) runFix(d config.DeviceConfig, ports []string) tea.Cmd {
-	return RunTaskOnDevices(context.Background(), m.cfg, []config.DeviceConfig{d}, func(ctx context.Context, dev config.DeviceConfig, cfg *config.Config) (string, error) {
-		return fixPorts(ctx, dev, cfg, ports)
-	})
+	return func() tea.Msg {
+		ctx := context.Background()
+		// stream progress lines into the event loop as they happen;
+		// worker runs in its own goroutine so the TUI keeps rendering
+		done := make(chan taskDoneMsg, 1)
+		go func() {
+			status, err := fixPorts(ctx, d, m.cfg, ports, func(line string) {
+				if tuiProgram != nil {
+					tuiProgram.Send(fixStepMsg{line: line})
+				}
+			})
+			done <- taskDoneMsg{results: []taskResult{{name: d.Name, status: status, err: err}}}
+		}()
+		return <-done
+	}
 }
 
 func (m *portFixModel) View() string {
@@ -302,6 +338,14 @@ func (m *portFixModel) View() string {
 		b.WriteString(titleStyle.Render(" Port Fix ") + "\n\n")
 		b.WriteString(dimStyle.Render("Fixing ports...") + "\n")
 		b.WriteString(spinner() + "\n")
+		// live progress log (tail of recent lines)
+		start := 0
+		if len(m.log) > 12 {
+			start = len(m.log) - 12
+		}
+		for _, line := range m.log[start:] {
+			b.WriteString(line + "\n")
+		}
 		b.WriteString("\n" + renderFooter("esc", "cancel"))
 		return b.String()
 	case phaseDone:

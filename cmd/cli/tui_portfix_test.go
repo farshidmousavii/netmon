@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -107,5 +108,22 @@ func TestRealWorldOutput(t *testing.T) {
 		"Center-A-FL0-E#exit\r\n"
 	if got := parseLastSourceAddress(raw); got != "0050.7966.6800" {
 		t.Errorf("real-world parse = %q, want 0050.7966.6800", got)
+	}
+}
+
+// TestPortFixModelLogTail - running phase shows last N log lines only.
+func TestPortFixModelLogTail(t *testing.T) {
+	m := &portFixModel{phase: phaseRunning}
+	for i := 0; i < 20; i++ {
+		m.log = append(m.log, fmt.Sprintf("line-%d", i))
+	}
+	v := m.View()
+	for _, want := range []string{"line-8", "line-19"} { // tail of last 12
+		if !strings.Contains(v, want) {
+			t.Errorf("View missing %q", want)
+		}
+	}
+	if strings.Contains(v, "line-0") || strings.Contains(v, "line-7") {
+		t.Errorf("View should drop old lines (tail 12), got full log")
 	}
 }
