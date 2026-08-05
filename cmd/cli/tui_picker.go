@@ -166,6 +166,49 @@ func (p *DevicePicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
 	return true, false, false
 }
 
+// keyMsg - build a KeyMsg from a single rune (testing + mouse wheel reuse)
+func key(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+
+// HandleMouse - click row / wheel scroll for pickers.
+// rowTop = Y of first list row (after title/header), pageSize rows visible.
+// Returns true if the event was consumed.
+func (p *DevicePicker) HandleMouse(msg tea.MouseMsg) bool {
+	e := tea.MouseEvent(msg)
+	f := p.Filtered()
+	if len(f) == 0 {
+		return false
+	}
+	switch e.Button {
+	case tea.MouseButtonLeft:
+		if e.Action == tea.MouseActionPress {
+			idx := e.Y - 2 // rows start after title + blank line
+			if idx >= 0 && idx < p.PageSize && p.Offset+idx < len(f) {
+				p.Cursor = p.Offset + idx
+				return true
+			}
+		}
+	case tea.MouseButtonWheelUp:
+		if e.Action == tea.MouseActionPress {
+			p.HandleKey(key("up"))
+			return true
+		}
+	case tea.MouseButtonWheelDown:
+		if e.Action == tea.MouseActionPress {
+			p.HandleKey(key("down"))
+			return true
+		}
+	}
+	return false
+}
+
+// handlePickerMouse - shared mouse handling for pickers
+func handlePickerMouse(p *DevicePicker, msg tea.Msg) bool {
+	if mm, ok := msg.(tea.MouseMsg); ok {
+		return p.HandleMouse(mm)
+	}
+	return false
+}
+
 // resetViewport - jump cursor to top after filter changes
 func (p *DevicePicker) resetViewport() {
 	p.Cursor = 0

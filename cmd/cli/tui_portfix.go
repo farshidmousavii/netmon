@@ -48,6 +48,20 @@ func newPortFixModel(cfg *config.Config) *portFixModel {
 func (m *portFixModel) Init() tea.Cmd { return nil }
 
 func (m *portFixModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// mouse: pick switch or pick port phases
+	if mm, ok := msg.(tea.MouseMsg); ok {
+		switch m.phase {
+		case phasePickSwitch:
+			if !m.picker.Filtering {
+				m.picker.HandleMouse(mm)
+			}
+		case phasePickPort:
+			if m.ppicker != nil {
+				m.ppicker.HandleMouse(mm)
+			}
+		}
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch m.phase {

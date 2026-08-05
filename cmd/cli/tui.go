@@ -117,7 +117,7 @@ func (m helpModel) View() string {
 
 // runTUIEngine - main entry for TUI mode
 func runTUIEngine(ctx context.Context, cfg *config.Config) error {
-	tuiProgram = tea.NewProgram(newRootModel(cfg), tea.WithAltScreen(), tea.WithContext(ctx))
+	tuiProgram = tea.NewProgram(newRootModel(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	_, err := tuiProgram.Run()
 	return err
 }
@@ -218,6 +218,16 @@ func (m MenuModel) Init() tea.Cmd { return nil }
 
 func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		e := tea.MouseEvent(msg)
+		if e.Button == tea.MouseButtonLeft && e.Action == tea.MouseActionPress {
+			// menu items start at Y=8 (banner 4 + blank + title + blank)
+			idx := e.Y - 8
+			if idx >= 0 && idx < len(m.options) {
+				m.cursor = idx
+				return m, switchTo(m.options[m.cursor].make())
+			}
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
