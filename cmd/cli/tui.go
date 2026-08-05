@@ -189,55 +189,153 @@ var banner = []string{
 	"|_.__/_\\__,_\\__,_|_|",
 }
 
-type MenuModel struct {
-	cfg     *config.Config
-	cursor  int
-	options []struct {
-		label string
-		make  func() tea.Model
-	}
+// navItem - one screen inside a domain
+type navItem struct {
+	label string
+	make  func() tea.Model
 }
 
-func newMenuModel(cfg *config.Config) *MenuModel {
-	m := &MenuModel{cfg: cfg}
-	m.options = []struct {
-		label string
-		make  func() tea.Model
-	}{
-		{"Overview", func() tea.Model { return newOverviewModel(cfg) }},
-		{"Device list", func() tea.Model { return newDeviceListModel(cfg) }},
-		{"Port fix", func() tea.Model { return newPortFixModel(cfg) }},
-		{"Quick exec", func() tea.Model { return newQuickExecModel(cfg) }},
-		{"Backup", func() tea.Model { return newBackupModel(cfg) }},
-		{"Monitor", func() tea.Model { return newMonitorModel(cfg) }},
-	}
-	return m
+// navDomain - one domain column (left panel). Items = right panel.
+type navDomain struct {
+	label string
+	items []navItem
 }
 
-func (m MenuModel) Init() tea.Cmd { return nil }
+// domains - domain-based menu structure (lazygit-style).
+// Only domains that have items are shown.
+var domains = []navDomain{
+	{
+		label: "Dashboard",
+		items: []navItem{
+			{"Overview", func() tea.Model { return newOverviewModel(cfgGlobal) }},
+		},
+	},
+	{
+		label: "Assets",
+		items: []navItem{
+			{"Devices", func() tea.Model { return newDeviceListModel(cfgGlobal) }},
+		},
+	},
+	{
+		label: "Network",
+		items: []navItem{
+			{"Switches", func() tea.Model { return newDeviceListModelFiltered(cfgGlobal, "cisco") }},
+		},
+	},
+	{
+		label: "Operations",
+		items: []navItem{
+			{"Quick Exec", func() tea.Model { return newQuickExecModel(cfgGlobal) }},
+			{"Port Fix", func() tea.Model { return newPortFixModel(cfgGlobal) }},
+			{"Backup", func() tea.Model { return newBackupModel(cfgGlobal) }},
+		},
+	},
+	{
+		label: "Monitoring",
+		items: []navItem{
+			{"Status", func() tea.Model { return newMonitorModel(cfgGlobal) }},
+		},
+	},
+}
 
-func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// cfgGlobal - config shared by nav factories (set at startup)
+var cfgGlobal *config.Config
+
+// NavModel - two-panel navigation: domains left, items right.
+type NavModel struct {
+	cfg      *config.Config
+	dCursor  int // domain cursor (left panel)
+	iCursor  int // item cursor (right panel)
+	focus    int // 0 = left, 1 = right
+	selected int // domain whose items are shown (-1 = none)
+}
+
+func newMenuModel(cfg *config.Config) *NavModel {
+	cfgGlobal = cfg
+	return &NavModel{cfg: cfg, selected: -1}
+}
+
+func (m NavModel) Init() tea.Cmd { return nil }
+
+func (m *NavModel) currentDomain() *navDomain {
+	if m.selected < 0 || m.selected >= len(domains) {
+		return nil
+	}
+	return &domains[m.selected]
+}
+
+func (m NavModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.cursor < len(m.options)-1 {
-				m.cursor++
-			}
-		case "g", "home":
-			m.cursor = 0
-		case "G", "end":
-			m.cursor = len(m.options) - 1
-		case "enter":
-			return m, switchTo(m.options[m.cursor].make())
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "?":
 			return m, switchTo(helpModel{parent: m, keys: menuKeys})
+		case "up", "k":
+			if m.focus == 0 {
+				if m.dCursor > 0 {
+					m.dCursor--
+					m.iCursor = 0
+				}
+			} else {
+				if m.iCursor > 0 {
+					m.iCursor--
+				}
+			}
+		case "down", "j":
+			if m.focus == 0 {
+				if m.dCursor < len(domains)-1 {
+					m.dCursor++
+					m.iCursor = 0
+				}
+			} else {
+				if d := m.currentDomain(); d != nil && m.iCursor < len(d.items)-1 {
+					m.iCursor++
+				}
+			}
+		case "left", "h":
+			if m.focus == 1 {
+				m.focus = 0
+			}
+		case "right", "l", "enter", "tab":
+			if m.focus == 0 {
+				// show items of hovered domain, focus right
+				m.selected = m.dCursor
+				m.focus = 1
+				m.iCursor = 0
+			} else if m.focus == 1 {
+				if msg.String() == "tab" {
+					m.focus = 0
+					break
+				}
+				// open the screen
+				if d := m.currentDomain(); d != nil && m.iCursor < len(d.items) {
+					return m, switchTo(d.items[m.iCursor].make())
+				}
+			}
+		case "esc", "b":
+			if m.focus == 1 {
+				m.focus = 0
+			} else {
+				m.selected = -1
+			}
+		case "g", "home":
+			if m.focus == 0 {
+				m.dCursor = 0
+				m.iCursor = 0
+			} else {
+				m.iCursor = 0
+			}
+		case "G", "end":
+			if m.focus == 0 {
+				m.dCursor = len(domains) - 1
+				m.iCursor = 0
+			} else {
+				if d := m.currentDomain(); d != nil {
+					m.iCursor = len(d.items) - 1
+				}
+			}
 		}
 	}
 	return m, nil
@@ -245,34 +343,65 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 var menuKeys = [][2]string{
 	{"↑/k ↓/j", "navigate"},
-	{"enter", "open screen"},
+	{"→/l / enter", "select domain / open item"},
+	{"tab", "switch panel"},
+	{"←/h / esc", "back to domains"},
 	{"g/G", "top/bottom"},
 	{"?", "help"},
 	{"q", "quit"},
 }
 
-func (m MenuModel) View() string {
+func (m NavModel) View() string {
 	var b strings.Builder
 
-	// ASCII art banner
+	// banner
 	bannerStyle := lipgloss.NewStyle().Foreground(colPrimary).Bold(true)
 	for _, line := range banner {
 		b.WriteString(bannerStyle.Render(line) + "\n")
 	}
-	// small menu title under the banner
-	b.WriteString("\n" + dimStyle.Render("─ main menu ─") + "\n\n")
+	b.WriteString("\n")
 
-	for i, opt := range m.options {
-		cursor := "  "
+	// two-panel layout: domains left, items right
+	domainCol := lipgloss.NewStyle().Width(20).Padding(0, 1)
+	itemCol := lipgloss.NewStyle().Width(30).Padding(0, 1)
+
+	var lb, rb strings.Builder
+	for i, d := range domains {
 		style := dimStyle
-		if i == m.cursor {
-			cursor = "▸ "
+		marker := "  "
+		if i == m.dCursor {
 			style = accStyle
+			marker = "▸ "
 		}
-		b.WriteString(cursor + style.Render(opt.label) + "\n")
+		lb.WriteString(marker + style.Render(d.label) + "\n")
+	}
+
+	if d := m.currentDomain(); d != nil {
+		// right panel header
+		rb.WriteString(dimStyle.Render(d.label) + "\n\n")
+		for i, item := range d.items {
+			style := dimStyle
+			marker := "  "
+			if i == m.iCursor && m.focus == 1 {
+				style = accStyle
+				marker = "▸ "
+			}
+			rb.WriteString(marker + style.Render(item.label) + "\n")
+		}
+	} else {
+		rb.WriteString(dimStyle.Render("→ select a domain") + "\n")
+	}
+
+	// panels side by side
+	if m.focus == 0 {
+		b.WriteString(accStyle.Render(domainCol.Render(lb.String())))
+		b.WriteString(dimStyle.Render(itemCol.Render(rb.String())))
+	} else {
+		b.WriteString(dimStyle.Render(domainCol.Render(lb.String())))
+		b.WriteString(accStyle.Render(itemCol.Render(rb.String())))
 	}
 
 	b.WriteString("\n" + renderFooter(
-		"↑/↓", "navigate", "enter", "open", "g/G", "top/bottom", "?", "help", "q", "quit"))
+		"↑/↓", "navigate", "→/enter", "open", "tab", "switch panel", "←/esc", "back", "?", "help", "q", "quit"))
 	return b.String()
 }

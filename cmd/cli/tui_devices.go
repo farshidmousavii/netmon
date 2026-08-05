@@ -38,8 +38,18 @@ type deviceListModel struct {
 var formLabels = []string{"Name", "IP", "Vendor (cisco/mikrotik)", "Credential", "Port (22)"}
 
 func newDeviceListModel(cfg *config.Config) *deviceListModel {
+	return newDeviceListModelFiltered(cfg, "")
+}
+
+// newDeviceListModelFiltered - device list with an initial filter query
+// (e.g. "cisco" for Switches). User can change/clear it freely afterwards.
+func newDeviceListModelFiltered(cfg *config.Config, initialFilter string) *deviceListModel {
 	m := &deviceListModel{cfg: cfg, pageSize: 15, loading: true, configPath: configPath}
 	m.load()
+	if initialFilter != "" {
+		m.query = initialFilter
+		m.applyFilter()
+	}
 	return m
 }
 
