@@ -158,6 +158,7 @@ var domains = []shellDomain{
 		label: "Dashboard",
 		items: []shellItem{
 			{"Overview", func() tea.Model { return newOverviewModel(cfgGlobal) }},
+			{"Health", func() tea.Model { return newHealthModel(cfgGlobal) }},
 		},
 	},
 	{
