@@ -15,6 +15,8 @@ func mkDevices(n int) []config.DeviceConfig {
 	return out
 }
 
+func key(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+
 // scrollDown - press down n times
 func scrollDown(p *DevicePicker, n int) {
 	for i := 0; i < n; i++ {
@@ -175,26 +177,6 @@ func TestPickerFilterEmptyRestoresAll(t *testing.T) {
 	p.HandleKey(key("backspace"))
 	if len(p.Filtered()) != 30 {
 		t.Fatalf("empty query should restore all, got %d", len(p.Filtered()))
-	}
-}
-
-func TestPickerMouseClick(t *testing.T) {
-	p := NewDevicePicker(mkDevices(30), "t")
-	p.PageSize = 12
-	// click row 5 (Y=2+5=7) → cursor at index 5
-	p.HandleMouse(tea.MouseMsg{Type: tea.MouseLeft, X: 5, Y: 7, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if p.Cursor != 5 {
-		t.Fatalf("click row 5: cursor=%d, want 5", p.Cursor)
-	}
-	// click past page end (row 20) → ignored
-	p.HandleMouse(tea.MouseMsg{Type: tea.MouseLeft, X: 5, Y: 25, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if p.Cursor != 5 {
-		t.Fatalf("click out of range should be ignored, cursor=%d", p.Cursor)
-	}
-	// wheel down → cursor+1
-	p.HandleMouse(tea.MouseMsg{Type: tea.MouseWheelDown, X: 5, Y: 7, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
-	if p.Cursor != 6 {
-		t.Fatalf("wheel down: cursor=%d, want 6", p.Cursor)
 	}
 }
 

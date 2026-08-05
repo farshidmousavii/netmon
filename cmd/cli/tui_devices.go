@@ -148,47 +148,6 @@ func (m deviceListModel) Init() tea.Cmd { return nil }
 
 func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.MouseMsg:
-		e := tea.MouseEvent(msg)
-		if m.filtering || m.formMode != "" {
-			return m, nil
-		}
-		switch e.Button {
-		case tea.MouseButtonLeft:
-			if e.Action == tea.MouseActionPress {
-				rowTop := 2
-				if m.filtering {
-					rowTop = 4
-				}
-				idx := e.Y - rowTop - 2 // title + header rows
-				if idx >= 0 && idx < m.pageSize && m.offset+idx < len(m.filtered) {
-					m.cursor = m.offset + idx
-				}
-			}
-		case tea.MouseButtonWheelUp:
-			if e.Action == tea.MouseActionPress {
-				if m.cursor > 0 {
-					m.cursor--
-					if m.cursor < m.offset {
-						m.offset = m.cursor
-					}
-				}
-			}
-		case tea.MouseButtonWheelDown:
-			if e.Action == tea.MouseActionPress {
-				if m.cursor < len(m.filtered)-1 {
-					m.cursor++
-					end := m.offset + m.pageSize
-					if end > len(m.filtered) {
-						end = len(m.filtered)
-					}
-					if m.cursor >= end {
-						m.offset++
-					}
-				}
-			}
-		}
-		return m, nil
 	case tea.KeyMsg:
 		// form mode: handle input
 		if m.formMode == "confirm-delete" {

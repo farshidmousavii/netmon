@@ -30,11 +30,6 @@ func newQuickExecModel(cfg *config.Config) *quickExecModel {
 func (m *quickExecModel) Init() tea.Cmd { return nil }
 
 func (m *quickExecModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// mouse in pick mode: click row / wheel scroll
-	if mm, ok := msg.(tea.MouseMsg); ok && m.mode == "pick" && !m.picker.Filtering {
-		m.picker.HandleMouse(mm)
-		return m, nil
-	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch m.mode {

@@ -122,35 +122,6 @@ var portPickerHelpKeys = [][2]string{
 	{"esc", "back"},
 }
 
-// HandleMouse - click row / wheel scroll for port picker
-func (p *PortPicker) HandleMouse(msg tea.MouseMsg) bool {
-	e := tea.MouseEvent(msg)
-	if len(p.Ports) == 0 {
-		return false
-	}
-	switch e.Button {
-	case tea.MouseButtonLeft:
-		if e.Action == tea.MouseActionPress {
-			idx := e.Y - 2
-			if idx >= 0 && idx < p.PageSize && p.Offset+idx < len(p.Ports) {
-				p.Cursor = p.Offset + idx
-				return true
-			}
-		}
-	case tea.MouseButtonWheelUp:
-		if e.Action == tea.MouseActionPress {
-			p.HandleKey(key("up"))
-			return true
-		}
-	case tea.MouseButtonWheelDown:
-		if e.Action == tea.MouseActionPress {
-			p.HandleKey(key("down"))
-			return true
-		}
-	}
-	return false
-}
-
 func (p *PortPicker) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" "+p.Title+" ") + "\n\n")
