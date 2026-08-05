@@ -10,6 +10,7 @@ log/
 
 # Config files
 config.yaml
+*.bak
 *.csv
 .env
 
