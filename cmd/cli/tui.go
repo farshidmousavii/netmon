@@ -117,7 +117,7 @@ func (m helpModel) View() string {
 
 // runTUIEngine - main entry for TUI mode
 func runTUIEngine(ctx context.Context, cfg *config.Config) error {
-	p := tea.NewProgram(newRootModel(cfg), tea.WithContext(ctx))
+	p := tea.NewProgram(newRootModel(cfg), tea.WithAltScreen(), tea.WithContext(ctx))
 	_, err := p.Run()
 	return err
 }
@@ -177,7 +177,13 @@ func backToMenu() tea.Cmd {
 	return func() tea.Msg { return switchMsg{model: nil} }
 }
 
-// ─── Menu model ───
+// banner - ASCII art logo (small, single color)
+var banner = []string{
+	" _    _    _          ",
+	"| |__(_)__| |__ _ _ _ ",
+	"| '_ \\ / _` / _` | '_|",
+	"|_.__/_\\__,_\\__,_|_|",
+}
 
 type MenuModel struct {
 	cfg     *config.Config
@@ -243,7 +249,14 @@ var menuKeys = [][2]string{
 
 func (m MenuModel) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(" Bidar ") + "\n\n")
+
+	// ASCII art banner
+	bannerStyle := lipgloss.NewStyle().Foreground(colPrimary).Bold(true)
+	for _, line := range banner {
+		b.WriteString(bannerStyle.Render(line) + "\n")
+	}
+	// small menu title under the banner
+	b.WriteString("\n" + dimStyle.Render("─ main menu ─") + "\n\n")
 
 	for i, opt := range m.options {
 		cursor := "  "
