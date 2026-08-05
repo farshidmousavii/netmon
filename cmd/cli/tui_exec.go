@@ -17,6 +17,8 @@ type quickExecModel struct {
 	mode    string // "pick" | "input" | "running" | "done"
 	results []taskResult
 	scroll  int
+	// full output lines (all devices concatenated) for line-based scrolling
+	outLines []string
 }
 
 func newQuickExecModel(cfg *config.Config) *quickExecModel {
@@ -91,13 +93,16 @@ func (m *quickExecModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = "pick"
 				m.results = nil
 				m.scroll = 0
+				m.outLines = nil
 				return m, nil
 			case "up", "k":
 				if m.scroll > 0 {
 					m.scroll--
 				}
 			case "down", "j":
-				m.scroll++
+				if m.scroll < len(m.outLines)-1 {
+					m.scroll++
+				}
 			case "pgup", "left":
 				m.scroll -= 20
 				if m.scroll < 0 {
@@ -105,15 +110,34 @@ func (m *quickExecModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "pgdown", "right":
 				m.scroll += 20
+				if m.scroll > len(m.outLines)-1 {
+					m.scroll = max(0, len(m.outLines)-1)
+				}
 			case "home", "g":
 				m.scroll = 0
 			case "end", "G":
-				m.scroll = len(m.results)
+				m.scroll = max(0, len(m.outLines)-1)
 			}
 		}
 	case taskDoneMsg:
 		m.mode = "done"
 		m.results = msg.results
+		// build full output lines (device header + status lines each)
+		var lines []string
+		for _, r := range m.results {
+			if r.err != nil {
+				lines = append(lines, fmt.Sprintf("✗ %s — %s", r.name, r.err.Error()))
+			} else {
+				lines = append(lines, fmt.Sprintf("✓ %s", r.name))
+				clean := strings.ReplaceAll(strings.TrimSuffix(r.status, "\n"), "\r", "")
+				for _, l := range strings.Split(clean, "\n") {
+					lines = append(lines, "  "+l)
+				}
+			}
+			lines = append(lines, "")
+		}
+		m.outLines = lines
+		m.scroll = 0
 		return m, nil
 	case spinnerTick:
 		spinnerIndex++
@@ -160,31 +184,34 @@ func (m *quickExecModel) View() string {
 	case "done":
 		var b strings.Builder
 		b.WriteString(titleStyle.Render(" Quick Exec Results ") + "\n\n")
-		// skip results scrolled past (one result block = device header + status lines)
-		skipped := 0
-		shown := 0
-		for _, r := range m.results {
-			block := 2 // header + status
-			if r.err == nil && strings.Count(r.status, "\n") > 0 {
-				block = 2 + strings.Count(r.status, "\n")
-			}
-			if skipped < m.scroll {
-				skipped += block
-				continue
-			}
-			if shown >= 20 {
-				b.WriteString(dimStyle.Render(fmt.Sprintf("… %d more result(s) below — ↓/pgdn to scroll\n", len(m.results)-m.scroll-shown)))
-				break
-			}
-			if r.err != nil {
-				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), errStyle.Render(r.err.Error())))
-			} else {
-				b.WriteString(fmt.Sprintf("  %s %s\n%s\n\n", okStyle.Render("✓"), deviceStyle.Render(r.name), dimStyle.Render(r.status)))
-			}
-			shown++
+		// line-based window: show lines[scroll .. scroll+height)
+		height := 25 // visible lines (rough terminal height)
+		end := m.scroll + height
+		if end > len(m.outLines) {
+			end = len(m.outLines)
 		}
-		if len(m.results) > 20 || m.scroll > 0 {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("scroll %d · ", m.scroll)))
+		if m.scroll >= len(m.outLines) && m.scroll > 0 {
+			m.scroll = max(0, len(m.outLines)-1)
+			end = len(m.outLines)
+		}
+		for _, l := range m.outLines[m.scroll:end] {
+			if strings.HasPrefix(l, "✗") {
+				b.WriteString(errStyle.Render(l) + "\n")
+			} else if strings.HasPrefix(l, "✓") {
+				b.WriteString(okStyle.Render(l) + "\n")
+			} else {
+				b.WriteString(dimStyle.Render(l) + "\n")
+			}
+		}
+		// scroll indicator
+		total := len(m.outLines)
+		pct := 0
+		if total > 0 {
+			pct = (m.scroll * 100) / total
+		}
+		if total > height {
+			b.WriteString(fmt.Sprintf("\n%s %d%% (%d/%d lines) · ↑/↓ scroll · pgup/pgdn page · g/G top/bottom\n",
+				dimStyle.Render("scroll"), pct, m.scroll, total))
 		}
 		return b.String()
 	default:
