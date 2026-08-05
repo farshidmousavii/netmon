@@ -126,61 +126,6 @@ func runTUIEngine(ctx context.Context, cfg *config.Config) error {
 // from worker goroutines (port fix steps) into the event loop.
 var tuiProgram *tea.Program
 
-// ─── Root model ───
-
-type RootModel struct {
-	cfg    *config.Config
-	mode   tea.Model
-	width  int
-	height int
-}
-
-func newRootModel(cfg *config.Config) *RootModel {
-	return &RootModel{cfg: cfg, mode: newMenuModel(cfg)}
-}
-
-func (m RootModel) Init() tea.Cmd { return nil }
-
-func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-	case switchMsg:
-		if msg.model == nil {
-			m.mode = newMenuModel(m.cfg)
-			return m, m.mode.Init()
-		}
-		m.mode = msg.model
-		return m, m.mode.Init()
-	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
-	}
-	updated, cmd := m.mode.Update(msg)
-	m.mode = updated
-	return m, cmd
-}
-
-func (m RootModel) View() string {
-	if m.mode == nil {
-		return ""
-	}
-	return m.mode.View()
-}
-
-// ─── Shared messages ───
-
-type switchMsg struct{ model tea.Model }
-
-func switchTo(model tea.Model) tea.Cmd {
-	return func() tea.Msg { return switchMsg{model: model} }
-}
-
-func backToMenu() tea.Cmd {
-	return func() tea.Msg { return switchMsg{model: nil} }
-}
-
 // banner - ASCII art logo (small, single color)
 var banner = []string{
 	" _    _    _          ",
@@ -189,42 +134,51 @@ var banner = []string{
 	"|_.__/_\\__,_\\__,_|_|",
 }
 
-// navItem - one screen inside a domain
-type navItem struct {
+// cfgGlobal - config shared by screen factories (set at startup)
+var cfgGlobal *config.Config
+
+// ─── Shell layout: header + left nav + content + status bar ───
+
+// shellItem - one screen inside a domain (right panel content)
+type shellItem struct {
 	label string
 	make  func() tea.Model
 }
 
-// navDomain - one domain column (left panel). Items = right panel.
-type navDomain struct {
+// shellDomain - one domain column (left nav, always visible)
+type shellDomain struct {
 	label string
-	items []navItem
+	items []shellItem
 }
 
-// domains - domain-based menu structure (lazygit-style).
-// Only domains that have items are shown.
-var domains = []navDomain{
+// domains - domain structure. Left nav shows ALL domains (empty ones
+// render as placeholders); items are only the real screens.
+var domains = []shellDomain{
 	{
 		label: "Dashboard",
-		items: []navItem{
+		items: []shellItem{
 			{"Overview", func() tea.Model { return newOverviewModel(cfgGlobal) }},
 		},
 	},
 	{
 		label: "Assets",
-		items: []navItem{
+		items: []shellItem{
 			{"Devices", func() tea.Model { return newDeviceListModel(cfgGlobal) }},
 		},
 	},
 	{
 		label: "Network",
-		items: []navItem{
+		items: []shellItem{
 			{"Switches", func() tea.Model { return newDeviceListModelFiltered(cfgGlobal, "cisco") }},
 		},
 	},
 	{
+		label: "Discovery",
+		items: []shellItem{},
+	},
+	{
 		label: "Operations",
-		items: []navItem{
+		items: []shellItem{
 			{"Quick Exec", func() tea.Model { return newQuickExecModel(cfgGlobal) }},
 			{"Port Fix", func() tea.Model { return newPortFixModel(cfgGlobal) }},
 			{"Backup", func() tea.Model { return newBackupModel(cfgGlobal) }},
@@ -232,40 +186,78 @@ var domains = []navDomain{
 	},
 	{
 		label: "Monitoring",
-		items: []navItem{
+		items: []shellItem{
 			{"Status", func() tea.Model { return newMonitorModel(cfgGlobal) }},
 		},
 	},
+	{
+		label: "Reports",
+		items: []shellItem{},
+	},
+	{
+		label: "Settings",
+		items: []shellItem{},
+	},
 }
 
-// cfgGlobal - config shared by nav factories (set at startup)
-var cfgGlobal *config.Config
-
-// NavModel - two-panel navigation: domains left, items right.
-type NavModel struct {
+// ShellModel - the app shell: persistent left nav + content area.
+type ShellModel struct {
 	cfg      *config.Config
-	dCursor  int // domain cursor (left panel)
-	iCursor  int // item cursor (right panel)
-	focus    int // 0 = left, 1 = right
-	selected int // domain whose items are shown (-1 = none)
+	dCursor  int
+	iCursor  int
+	focus    int // 0 = nav, 1 = content
+	selected int // domain with items shown (-1 = none)
+	content  tea.Model
+	width    int
+	height   int
 }
 
-func newMenuModel(cfg *config.Config) *NavModel {
+func newRootModel(cfg *config.Config) *ShellModel {
 	cfgGlobal = cfg
-	return &NavModel{cfg: cfg, selected: -1}
+	return &ShellModel{cfg: cfg, selected: -1}
 }
 
-func (m NavModel) Init() tea.Cmd { return nil }
+func (m ShellModel) Init() tea.Cmd { return nil }
 
-func (m *NavModel) currentDomain() *navDomain {
+func (m *ShellModel) currentDomain() *shellDomain {
 	if m.selected < 0 || m.selected >= len(domains) {
 		return nil
 	}
 	return &domains[m.selected]
 }
 
-func (m NavModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *ShellModel) openItem() tea.Cmd {
+	if d := m.currentDomain(); d != nil && m.iCursor < len(d.items) {
+		m.content = d.items[m.iCursor].make()
+		m.focus = 1
+		return m.content.Init()
+	}
+	return nil
+}
+
+func (m ShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// content screen active (full-screen mode): pass through
+	if m.content != nil {
+		switch msg.(type) {
+		case switchMsg:
+			// back to shell (model nil = return to nav)
+			m.content = nil
+			return m, nil
+		case tea.KeyMsg:
+			k := msg.(tea.KeyMsg).String()
+			if k == "esc" || k == "q" || k == "b" {
+				m.content = nil
+				return m, nil
+			}
+		}
+		updated, cmd := m.content.Update(msg)
+		m.content = updated
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -311,7 +303,7 @@ func (m NavModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// open the screen
 				if d := m.currentDomain(); d != nil && m.iCursor < len(d.items) {
-					return m, switchTo(d.items[m.iCursor].make())
+					return m, m.openItem()
 				}
 			}
 		case "esc", "b":
@@ -336,6 +328,15 @@ func (m NavModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.iCursor = len(d.items) - 1
 				}
 			}
+		default:
+			// 1-8 jump to domain
+			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '8' {
+				idx := int(msg.String()[0] - '1')
+				if idx < len(domains) {
+					m.dCursor = idx
+					m.iCursor = 0
+				}
+			}
 		}
 	}
 	return m, nil
@@ -346,26 +347,50 @@ var menuKeys = [][2]string{
 	{"→/l / enter", "select domain / open item"},
 	{"tab", "switch panel"},
 	{"←/h / esc", "back to domains"},
+	{"1-8", "jump to domain"},
 	{"g/G", "top/bottom"},
 	{"?", "help"},
 	{"q", "quit"},
 }
 
-func (m NavModel) View() string {
+// headerBar - banner + version + user
+func (m ShellModel) headerBar() string {
 	var b strings.Builder
-
-	// banner
 	bannerStyle := lipgloss.NewStyle().Foreground(colPrimary).Bold(true)
 	for _, line := range banner {
 		b.WriteString(bannerStyle.Render(line) + "\n")
 	}
 	b.WriteString("\n")
+	return b.String()
+}
 
-	// two-panel layout: domains left, items right
-	domainCol := lipgloss.NewStyle().Width(20).Padding(0, 1)
-	itemCol := lipgloss.NewStyle().Width(30).Padding(0, 1)
+// statusBar - bottom bar: context shortcuts left, global right
+func (m ShellModel) statusBar() string {
+	left := "↑/↓ nav · →/enter open · esc back"
+	right := "? help · q quit"
+	barStyle := lipgloss.NewStyle().Foreground(colMuted).Background(colBg)
+	return barStyle.Render(" " + left + strings.Repeat(" ", max(0, m.width-len(left)-len(right)-2)) + right + " ")
+}
 
-	var lb, rb strings.Builder
+func (m ShellModel) View() string {
+	var b strings.Builder
+
+	// header
+	b.WriteString(m.headerBar())
+
+	// if a content screen is open, show it full-width below header
+	if m.content != nil {
+		b.WriteString(m.content.View())
+		b.WriteString("\n" + m.statusBar())
+		return b.String()
+	}
+
+	// left nav column (always visible)
+	navWidth := 18
+	navStyle := lipgloss.NewStyle().Width(navWidth).Padding(0, 1)
+
+	var nav strings.Builder
+	nav.WriteString(dimStyle.Render(" MODULES ") + "\n\n")
 	for i, d := range domains {
 		style := dimStyle
 		marker := "  "
@@ -373,12 +398,13 @@ func (m NavModel) View() string {
 			style = accStyle
 			marker = "▸ "
 		}
-		lb.WriteString(marker + style.Render(d.label) + "\n")
+		nav.WriteString(marker + style.Render(d.label) + "\n")
 	}
 
-	if d := m.currentDomain(); d != nil {
-		// right panel header
-		rb.WriteString(dimStyle.Render(d.label) + "\n\n")
+	// content panel: items of selected domain, or hint
+	var content strings.Builder
+	if d := m.currentDomain(); d != nil && len(d.items) > 0 {
+		content.WriteString(accStyle.Render(" "+d.label+" ") + "\n\n")
 		for i, item := range d.items {
 			style := dimStyle
 			marker := "  "
@@ -386,22 +412,34 @@ func (m NavModel) View() string {
 				style = accStyle
 				marker = "▸ "
 			}
-			rb.WriteString(marker + style.Render(item.label) + "\n")
+			content.WriteString(marker + style.Render(item.label) + "\n")
 		}
+	} else if m.selected >= 0 {
+		content.WriteString(dimStyle.Render(" "+domains[m.selected].label+" — coming soon") + "\n")
 	} else {
-		rb.WriteString(dimStyle.Render("→ select a domain") + "\n")
+		content.WriteString(dimStyle.Render("→ select a module") + "\n")
 	}
 
 	// panels side by side
 	if m.focus == 0 {
-		b.WriteString(accStyle.Render(domainCol.Render(lb.String())))
-		b.WriteString(dimStyle.Render(itemCol.Render(rb.String())))
+		b.WriteString(accStyle.Render(navStyle.Render(nav.String())))
 	} else {
-		b.WriteString(dimStyle.Render(domainCol.Render(lb.String())))
-		b.WriteString(accStyle.Render(itemCol.Render(rb.String())))
+		b.WriteString(dimStyle.Render(navStyle.Render(nav.String())))
 	}
+	b.WriteString(content.String())
 
-	b.WriteString("\n" + renderFooter(
-		"↑/↓", "navigate", "→/enter", "open", "tab", "switch panel", "←/esc", "back", "?", "help", "q", "quit"))
+	b.WriteString("\n" + m.statusBar())
 	return b.String()
+}
+
+// ─── Shared messages ───
+
+type switchMsg struct{ model tea.Model }
+
+func switchTo(model tea.Model) tea.Cmd {
+	return func() tea.Msg { return switchMsg{model: model} }
+}
+
+func backToMenu() tea.Cmd {
+	return func() tea.Msg { return switchMsg{model: nil} }
 }
