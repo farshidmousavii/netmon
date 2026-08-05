@@ -10,7 +10,7 @@ import (
 func mkDevices(n int) []config.DeviceConfig {
 	out := make([]config.DeviceConfig, n)
 	for i := range out {
-		out[i] = config.DeviceConfig{Name: string(rune('a' + i%26)) + string(rune('0'+i/26)), IP: "10.0.0.1"}
+		out[i] = config.DeviceConfig{Name: string(rune('a'+i%26)) + string(rune('0'+i/26)), IP: "10.0.0.1"}
 	}
 	return out
 }
@@ -129,6 +129,54 @@ func TestPortPickerScrollFollowsCursor(t *testing.T) {
 	p.HandleKey(key("pgdown"))
 	if p.Cursor != 13 || p.Offset != 13 {
 		t.Fatalf("pgdown: cursor=%d offset=%d, want 13/13", p.Cursor, p.Offset)
+	}
+}
+
+func TestPickerFilterMode(t *testing.T) {
+	p := NewDevicePicker(mkDevices(30), "t")
+	p.PageSize = 12
+	// navigate somewhere, then filter
+	scrollDown(p, 20)
+	// press / → filtering mode
+	p.HandleKey(key("/"))
+	if !p.Filtering {
+		t.Fatal("expected filtering mode after /")
+	}
+	// type filter
+	p.HandleKey(key("a"))
+	p.HandleKey(key("b"))
+	if p.Query != "ab" {
+		t.Fatalf("query = %q, want ab", p.Query)
+	}
+	// backspace removes char
+	p.HandleKey(key("backspace"))
+	if p.Query != "a" {
+		t.Fatalf("query after backspace = %q, want a", p.Query)
+	}
+	// typing resets viewport (cursor to top)
+	if p.Cursor != 0 || p.Offset != 0 {
+		t.Fatalf("viewport after filter: cursor=%d offset=%d, want 0/0", p.Cursor, p.Offset)
+	}
+	// enter exits filtering
+	p.HandleKey(key("enter"))
+	if p.Filtering {
+		t.Fatal("expected filtering off after enter")
+	}
+}
+
+func TestPickerFilterEmptyRestoresAll(t *testing.T) {
+	p := NewDevicePicker(mkDevices(30), "t")
+	p.HandleKey(key("/"))
+	// type query that matches nothing, then backspace it all
+	p.HandleKey(key("z"))
+	p.HandleKey(key("z"))
+	if len(p.Filtered()) != 0 {
+		t.Fatalf("filter zz should match 0, got %d", len(p.Filtered()))
+	}
+	p.HandleKey(key("backspace"))
+	p.HandleKey(key("backspace"))
+	if len(p.Filtered()) != 30 {
+		t.Fatalf("empty query should restore all, got %d", len(p.Filtered()))
 	}
 }
 

@@ -11,16 +11,18 @@ import (
 
 // DevicePicker - shared multi-select device list.
 // Keys: ↑/↓ nav, space toggle, a select all, n select none,
-//       / filter, ←/→ page, g/G top/bottom, ? help, enter confirm, esc/q back.
+//
+//	/ filter, ←/→ page, g/G top/bottom, ? help, enter confirm, esc/q back.
 type DevicePicker struct {
-	Devices  []config.DeviceConfig
-	Selected map[string]bool
-	Cursor   int
-	Offset   int
-	PageSize int
-	Query    string
-	Title    string
-	Confirm  string // footer confirm label (e.g. "run", "fix")
+	Devices   []config.DeviceConfig
+	Selected  map[string]bool
+	Cursor    int
+	Offset    int
+	PageSize  int
+	Query     string
+	Title     string
+	Confirm   string // footer confirm label (e.g. "run", "fix")
+	Filtering bool   // in filter input mode (/ pressed)
 }
 
 func NewDevicePicker(devices []config.DeviceConfig, title string) *DevicePicker {
@@ -67,6 +69,26 @@ func (p *DevicePicker) CountSelected() int {
 
 // HandleKey - returns (handled, back, confirm)
 func (p *DevicePicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
+	// filter input mode: keystrokes go to query
+	if p.Filtering {
+		switch msg.String() {
+		case "enter", "esc", "/":
+			p.Filtering = false
+		case "backspace":
+			if len(p.Query) > 0 {
+				p.Query = p.Query[:len(p.Query)-1]
+				p.resetViewport()
+			}
+		case "ctrl+c":
+			return true, false, false
+		default:
+			if len(msg.String()) == 1 {
+				p.Query += msg.String()
+				p.resetViewport()
+			}
+		}
+		return true, false, false
+	}
 	// viewport window for cursor clamping
 	window := func() (int, int) {
 		f := p.Filtered()
@@ -134,25 +156,20 @@ func (p *DevicePicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
 			p.Cursor = p.Offset
 		}
 	case "/":
-		p.Query = ""
+		p.Filtering = true
 		return true, false, false
 	case "enter":
 		return true, false, true
 	case "esc", "b", "q":
 		return true, true, false
-	default:
-		// typing filter chars
-		if len(msg.String()) == 1 {
-			p.Query += msg.String()
-			if p.Cursor >= len(p.Filtered()) {
-				p.Cursor = len(p.Filtered()) - 1
-			}
-			if p.Cursor < 0 {
-				p.Cursor = 0
-			}
-		}
 	}
 	return true, false, false
+}
+
+// resetViewport - jump cursor to top after filter changes
+func (p *DevicePicker) resetViewport() {
+	p.Cursor = 0
+	p.Offset = 0
 }
 
 var pickerHelpKeys = [][2]string{
@@ -170,6 +187,12 @@ var pickerHelpKeys = [][2]string{
 func (p *DevicePicker) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" "+p.Title+" ") + "\n\n")
+
+	// filter input bar
+	if p.Filtering {
+		b.WriteString(accStyle.Render("/ "+p.Query+"▌") + "  " +
+			dimStyle.Render("filter (enter done · esc cancel)") + "\n\n")
+	}
 
 	filtered := p.Filtered()
 	if len(filtered) == 0 {

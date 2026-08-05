@@ -9,7 +9,8 @@ import (
 
 // PortPicker - multi-select port list (err-disabled ports of one switch).
 // Keys: ↑/↓ nav, space toggle, a all, n none, g/G top/bottom,
-//       ? help, enter confirm, esc back.
+//
+//	? help, enter confirm, esc back.
 type PortPicker struct {
 	Ports    []string
 	Selected map[string]bool

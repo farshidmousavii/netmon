@@ -15,17 +15,17 @@ import (
 
 var (
 	// neutrals
-	colText    = lipgloss.Color("252") // light gray text
-	colMuted   = lipgloss.Color("245") // dim secondary
-	colSubtle  = lipgloss.Color("240") // borders, separators
-	colBg      = lipgloss.Color("235") // deep background
+	colText   = lipgloss.Color("252") // light gray text
+	colMuted  = lipgloss.Color("245") // dim secondary
+	colSubtle = lipgloss.Color("240") // borders, separators
+	colBg     = lipgloss.Color("235") // deep background
 
 	// semantic hues
-	colPrimary   = lipgloss.Color("75")  // blue - info, active, links
-	colSuccess   = lipgloss.Color("114") // green - ok, online
-	colError     = lipgloss.Color("203") // red - fail, offline
-	colWarning   = lipgloss.Color("214") // amber - pending, warn
-	colAccent    = lipgloss.Color("141") // purple - selection, focus
+	colPrimary = lipgloss.Color("75")  // blue - info, active, links
+	colSuccess = lipgloss.Color("114") // green - ok, online
+	colError   = lipgloss.Color("203") // red - fail, offline
+	colWarning = lipgloss.Color("214") // amber - pending, warn
+	colAccent  = lipgloss.Color("141") // purple - selection, focus
 )
 
 // ─── Shared styles (immutable, package-level) ───
@@ -109,7 +109,7 @@ func (m helpModel) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Help ") + "\n\n")
 	for _, kv := range m.keys {
-		b.WriteString("  " + renderKey(kv[0]) + dimStyle.Render("  " + kv[1]) + "\n")
+		b.WriteString("  " + renderKey(kv[0]) + dimStyle.Render("  "+kv[1]) + "\n")
 	}
 	b.WriteString("\n" + renderFooter("?", "help", "esc", "back", "q", "quit"))
 	return b.String()

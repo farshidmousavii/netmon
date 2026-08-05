@@ -16,15 +16,16 @@ type deviceListMsg struct {
 }
 
 type deviceListModel struct {
-	cfg      *config.Config
-	devices  []config.DeviceConfig
-	loading  bool
-	err      error
-	cursor   int
-	offset   int
-	pageSize int
-	query    string
-	filtered []config.DeviceConfig
+	cfg       *config.Config
+	devices   []config.DeviceConfig
+	loading   bool
+	err       error
+	cursor    int
+	offset    int
+	pageSize  int
+	query     string
+	filtered  []config.DeviceConfig
+	filtering bool // in filter input mode
 }
 
 func newDeviceListModel(cfg *config.Config) *deviceListModel {
@@ -43,24 +44,21 @@ func (m *deviceListModel) load() {
 func (m *deviceListModel) applyFilter() {
 	if m.query == "" {
 		m.filtered = m.devices
-		return
-	}
-	q := strings.ToLower(m.query)
-	var f []config.DeviceConfig
-	for _, d := range m.devices {
-		if strings.Contains(strings.ToLower(d.Name), q) ||
-			strings.Contains(d.IP, q) ||
-			strings.Contains(strings.ToLower(d.Vendor), q) {
-			f = append(f, d)
+	} else {
+		q := strings.ToLower(m.query)
+		var f []config.DeviceConfig
+		for _, d := range m.devices {
+			if strings.Contains(strings.ToLower(d.Name), q) ||
+				strings.Contains(d.IP, q) ||
+				strings.Contains(strings.ToLower(d.Vendor), q) {
+				f = append(f, d)
+			}
 		}
+		m.filtered = f
 	}
-	m.filtered = f
-	if m.cursor >= len(m.filtered) {
-		m.cursor = len(m.filtered) - 1
-	}
-	if m.cursor < 0 {
-		m.cursor = 0
-	}
+	// reset viewport to top whenever filter changes
+	m.cursor = 0
+	m.offset = 0
 }
 
 func (m deviceListModel) Init() tea.Cmd { return nil }
@@ -68,6 +66,26 @@ func (m deviceListModel) Init() tea.Cmd { return nil }
 func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// filter input mode: everything goes to the query
+		if m.filtering {
+			switch msg.String() {
+			case "enter", "esc", "/":
+				m.filtering = false
+			case "backspace":
+				if len(m.query) > 0 {
+					m.query = m.query[:len(m.query)-1]
+					m.applyFilter()
+				}
+			case "ctrl+c":
+				return m, tea.Quit
+			default:
+				if len(msg.String()) == 1 {
+					m.query += msg.String()
+					m.applyFilter()
+				}
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "esc", "b":
 			return m, backToMenu()
@@ -111,15 +129,11 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offset = max(0, len(m.filtered)-m.pageSize)
 			}
 		case "/":
-			// enter filter mode: handled by simple prompt via state
-			m.query = ""
-			return m, tea.Printf("filter (type then enter): ")
+			// enter filter input mode
+			m.filtering = true
+			return m, nil
 		default:
-			// typing filter text
-			if len(msg.String()) == 1 {
-				m.query += msg.String()
-				m.applyFilter()
-			}
+			// ignore stray chars when not filtering
 		}
 	}
 	return m, nil
@@ -128,6 +142,12 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m deviceListModel) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Device List ") + "\n\n")
+
+	// filter input bar — shown whenever filtering
+	if m.filtering {
+		b.WriteString(accStyle.Render("/ "+m.query+"▌") + "  " +
+			dimStyle.Render("filter (enter done · esc cancel)") + "\n\n")
+	}
 
 	// header
 	b.WriteString(dimStyle.Render(fmt.Sprintf("%-2s %-22s %-16s %-10s", "", "NAME", "IP", "VENDOR")) + "\n")

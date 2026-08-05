@@ -198,7 +198,8 @@ func findStickyPort(dev device.Device, errPort string) (string, error) {
 
 // parseLastSourceAddress - extract "Last Source Address" MAC from
 // `show port-security interface` output. Format:
-//   Last Source Address:Vlan : 0050.7966.6800:1
+//
+//	Last Source Address:Vlan : 0050.7966.6800:1
 var lastSourceRe = regexp.MustCompile(`Last\s+Source\s+Address:?Vlan\s*:\s*([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})`)
 
 func parseLastSourceAddress(output string) string {
