@@ -74,19 +74,41 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				// scroll up if cursor left the window
+				if m.cursor < m.offset {
+					m.offset = m.cursor
+				}
 			}
 		case "down", "j":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
+				// scroll down if cursor passed window end
+				end := m.offset + m.pageSize
+				if end > len(m.filtered) {
+					end = len(m.filtered)
+				}
+				if m.cursor >= end {
+					m.offset++
+				}
 			}
 		case "pgup", "left":
 			m.offset -= m.pageSize
 			if m.offset < 0 {
 				m.offset = 0
 			}
+			m.cursor = m.offset
 		case "pgdown", "right":
-			if m.offset+m.pageSize < len(m.filtered) {
+			if len(m.filtered) > 0 && m.offset+m.pageSize < len(m.filtered) {
 				m.offset += m.pageSize
+				m.cursor = m.offset
+			}
+		case "g", "home":
+			m.cursor = 0
+			m.offset = 0
+		case "G", "end":
+			if len(m.filtered) > 0 {
+				m.cursor = len(m.filtered) - 1
+				m.offset = max(0, len(m.filtered)-m.pageSize)
 			}
 		case "/":
 			// enter filter mode: handled by simple prompt via state

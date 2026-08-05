@@ -131,3 +131,46 @@ func TestPortPickerScrollFollowsCursor(t *testing.T) {
 		t.Fatalf("pgdown: cursor=%d offset=%d, want 13/13", p.Cursor, p.Offset)
 	}
 }
+
+func TestDeviceListScrollFollowsCursor(t *testing.T) {
+	m := &deviceListModel{devices: mkDevices(30), filtered: mkDevices(30), pageSize: 15, loading: false}
+	// to bottom of first page (index 14)
+	for i := 0; i < 14; i++ {
+		mm, _ := m.Update(key("down"))
+		mm2 := mm.(deviceListModel)
+		m = &mm2
+	}
+	if m.cursor != 14 || m.offset != 0 {
+		t.Fatalf("first page: cursor=%d offset=%d, want 14/0", m.cursor, m.offset)
+	}
+	// one more down → page flips, cursor on first of new page
+	mm, _ := m.Update(key("down"))
+	mm2 := mm.(deviceListModel)
+	m = &mm2
+	if m.cursor != 15 || m.offset != 1 {
+		t.Fatalf("page flip: cursor=%d offset=%d, want 15/1", m.cursor, m.offset)
+	}
+	// down to bottom of list
+	for i := 0; i < 20; i++ {
+		mm, _ := m.Update(key("down"))
+		mm2 := mm.(deviceListModel)
+		m = &mm2
+	}
+	if m.cursor != 29 || m.offset != 15 {
+		t.Fatalf("bottom: cursor=%d offset=%d, want 29/15", m.cursor, m.offset)
+	}
+	// up from bottom → scrolls back
+	mm, _ = m.Update(key("up"))
+	mm2 = mm.(deviceListModel)
+	m = &mm2
+	if m.cursor != 28 || m.offset != 15 {
+		t.Fatalf("up: cursor=%d offset=%d, want 28/15", m.cursor, m.offset)
+	}
+	// page up → cursor lands on window top
+	mm, _ = m.Update(key("pgup"))
+	mm2 = mm.(deviceListModel)
+	m = &mm2
+	if m.cursor != 0 || m.offset != 0 {
+		t.Fatalf("pgup: cursor=%d offset=%d, want 0/0", m.cursor, m.offset)
+	}
+}
