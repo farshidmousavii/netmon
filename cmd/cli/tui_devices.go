@@ -27,6 +27,7 @@ type deviceListModel struct {
 	filtered   []config.DeviceConfig
 	filtering  bool // in filter input mode
 	configPath string
+	switchMode bool // cisco switch list: enter opens Switch Details
 	// form state (add/edit)
 	formMode   string // "", "add", "edit", "confirm-delete"
 	formField  int
@@ -50,6 +51,13 @@ func newDeviceListModelFiltered(cfg *config.Config, initialFilter string) *devic
 		m.query = initialFilter
 		m.applyFilter()
 	}
+	return m
+}
+
+// newSwitchListModel - switch list (cisco) where enter opens Switch Details.
+func newSwitchListModel(cfg *config.Config) *deviceListModel {
+	m := newDeviceListModelFiltered(cfg, "cisco")
+	m.switchMode = true
 	return m
 }
 
@@ -280,8 +288,10 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.offset = max(0, len(m.filtered)-m.pageSize)
 			}
 		case "/":
-			// enter filter input mode
+			// enter filter input mode (start fresh)
 			m.filtering = true
+			m.query = ""
+			m.applyFilter()
 			return m, nil
 		case "a":
 			m.startForm("add")
@@ -298,8 +308,11 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			// open device details for hovered device
+			// open details for hovered device (switch details if switch mode)
 			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+				if m.switchMode {
+					return m, switchTo(newSwitchDetailsModel(m.cfg, m.filtered[m.cursor]))
+				}
 				return m, switchTo(newDeviceDetailsModel(m.cfg, m.filtered[m.cursor]))
 			}
 		default:

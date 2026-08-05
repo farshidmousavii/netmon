@@ -169,7 +169,7 @@ var domains = []shellDomain{
 	{
 		label: "Network",
 		items: []shellItem{
-			{"Switches", func() tea.Model { return newDeviceListModelFiltered(cfgGlobal, "cisco") }},
+			{"Switches", func() tea.Model { return newSwitchListModel(cfgGlobal) }},
 		},
 	},
 	{
