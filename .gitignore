@@ -30,4 +30,5 @@ bin/
 
 
 # Dependencies
-vendor/
+vendor/*.bak
+*.tmp
