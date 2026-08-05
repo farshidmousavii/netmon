@@ -136,12 +136,29 @@ func runTUIEngine(ctx context.Context, cfg *config.Config) error {
 // from worker goroutines (port fix steps) into the event loop.
 var tuiProgram *tea.Program
 
-// banner - ASCII art logo (small, single color)
+// banner - ASCII art logo (big)
 var banner = []string{
-	" _    _    _          ",
-	"| |__(_)__| |__ _ _ _ ",
-	"| '_ \\ / _` / _` | '_|",
-	"|_.__/_\\__,_\\__,_|_|",
+	" ____  _     _            ",
+	"| __ )(_) __| | __ _ _ __ ",
+	"|  _ \\| |/ _` |/ _` | '__|",
+	"| |_) | | (_| | (_| | |   ",
+	"|____/|_|\\__,_|\\__,_|_|   ",
+}
+
+// bannerVersion - ASCII "v0.1"
+var bannerVersion = []string{
+	"     __   _ ",
+	"__ __/  \\ / |",
+	"\\ V / () || |",
+	" \\_/ \\__(_)_|",
+}
+
+// bannerAuthor - ASCII "Farshid Mousavi"
+var bannerAuthor = []string{
+	" ___            _    _    _   __  __                       _ ",
+	"| __|_ _ _ _ __| |_ (_)__| | |  \\/  |___ _  _ ___ __ ___ _(_)",
+	"| _/ _` | '_(_-< ' \\| / _` | | |\\/| / _ \\ || (_-</ _` \\ V / |",
+	"|_|\\__,_|_| /__/_||_|_\\__,_| |_|  |_\\___/\\_,_/__/\\__,_|\\_/|_|",
 }
 
 // cfgGlobal - config shared by screen factories (set at startup)
@@ -395,19 +412,26 @@ var menuKeys = [][2]string{
 	{"q", "quit"},
 }
 
-// headerBar - banner + title + version + user, framed
+// headerBar - big ASCII banner + version + author + user, framed
 func (m ShellModel) headerBar() string {
 	var b strings.Builder
 	bannerStyle := lipgloss.NewStyle().Foreground(colPrimary).Bold(true)
+	dimBanner := lipgloss.NewStyle().Foreground(colMuted).Bold(true)
+
+	// big BIDAR banner
 	for _, line := range banner {
 		b.WriteString(bannerStyle.Render(line) + "\n")
 	}
-	// title row: Bidar v0.1 ... Connected as: admin
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Center,
-		headerStyle.Render(" Bidar v0.1 "),
-		dimStyle.Render(strings.Repeat(" ", max(0, m.width-40))),
-		dimStyle.Render("Connected as: admin "),
-	) + "\n")
+	// side by side: version + author (pad version to author width)
+	version := strings.Join(bannerVersion, "\n")
+	author := strings.Join(bannerAuthor, "\n")
+	verW := lipgloss.Width(version)
+	authW := lipgloss.Width(author)
+	if verW < authW {
+		version = lipgloss.NewStyle().Width(authW).Render(version)
+	}
+	b.WriteString(dimBanner.Render(version) + bannerStyle.Render(author) + "\n")
+	b.WriteString("\n")
 	return b.String()
 }
 
