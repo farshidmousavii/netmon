@@ -297,6 +297,11 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.formErr = ""
 			}
 			return m, nil
+		case "enter":
+			// open device details for hovered device
+			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+				return m, switchTo(newDeviceDetailsModel(m.cfg, m.filtered[m.cursor]))
+			}
 		default:
 			// ignore stray chars when not filtering
 		}

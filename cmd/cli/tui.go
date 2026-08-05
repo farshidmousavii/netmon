@@ -238,13 +238,18 @@ func (m *ShellModel) openItem() tea.Cmd {
 func (m ShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// content screen active (full-screen mode): pass through
 	if m.content != nil {
-		switch msg.(type) {
+		switch v := msg.(type) {
 		case switchMsg:
-			// back to shell (model nil = return to nav)
-			m.content = nil
+			// nil = back to shell; model = nested screen (e.g. Device Details)
+			if v.model == nil {
+				m.content = nil
+			} else {
+				m.content = v.model
+				return m, m.content.Init()
+			}
 			return m, nil
 		case tea.KeyMsg:
-			k := msg.(tea.KeyMsg).String()
+			k := v.String()
 			if k == "esc" || k == "q" || k == "b" {
 				m.content = nil
 				return m, nil
