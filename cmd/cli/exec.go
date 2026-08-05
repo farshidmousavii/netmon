@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/device"
-	"github.com/farshidmousavii/netmon/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/device"
+	"github.com/farshidmousavii/bidar/internal/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -36,19 +36,19 @@ Target Selection (choose one):
 
 Examples:
   # Single device
-  netmon-cli exec -d core-switch -c "show ip interface brief"
+  bidar exec -d core-switch -c "show ip interface brief"
 
   # All Cisco devices with save
-  netmon-cli exec --type cisco -c "interface gi0/1" -c "shutdown" --save
+  bidar exec --type cisco -c "interface gi0/1" -c "shutdown" --save
 
   # Dry run (preview without execution)
-  netmon-cli exec --type cisco -c "interface gi0/1" -c "shutdown" --dry-run
+  bidar exec --type cisco -c "interface gi0/1" -c "shutdown" --dry-run
 
   # Save output to file
-  netmon-cli exec -d core-switch -c "show run" -o output.txt
+  bidar exec -d core-switch -c "show run" -o output.txt
 
   # Interactive mode
-  netmon-cli exec --type cisco`,
+  bidar exec --type cisco`,
 	Run: runExec,
 }
 

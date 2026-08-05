@@ -90,7 +90,7 @@ func TestFindStickyPort_Parsers(t *testing.T) {
 	}
 }
 
-// TestRealWorldOutput - raw output as netmon receives it (prompts,
+// TestRealWorldOutput - raw output as bidar receives it (prompts,
 // backspaces, CRLF) must still parse.
 func TestRealWorldOutput(t *testing.T) {
 	raw := "\r\nNamvaran North Building\r\nCenter-A-FL0-E>enable\r\nPassword: \r\n" +

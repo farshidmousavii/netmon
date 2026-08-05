@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/device"
-	"github.com/farshidmousavii/netmon/internal/logger"
-	"github.com/farshidmousavii/netmon/internal/report"
-	execWorker "github.com/farshidmousavii/netmon/internal/worker"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/device"
+	"github.com/farshidmousavii/bidar/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/report"
+	execWorker "github.com/farshidmousavii/bidar/internal/worker"
 )
 
 // DeviceWorker - A function that runs on every device

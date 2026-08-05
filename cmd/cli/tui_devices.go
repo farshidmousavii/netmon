@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/farshidmousavii/netmon/internal/config"
+	"github.com/farshidmousavii/bidar/internal/config"
 )
 
 // deviceListMsg - holds the loaded device list (simulated async load)

@@ -18,9 +18,9 @@ var (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:   "netmon-cli",
+		Use:   "bidar",
 		Short: "Network device monitoring and management tool",
-		Long: `NetMon is a CLI tool for monitoring and managing network devices.
+		Long: `Bidar is a CLI tool for monitoring and managing network devices.
 It supports Cisco and MikroTik devices with features like health checks,
 configuration backups, and bulk command execution.`}
 )

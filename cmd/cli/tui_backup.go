@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/farshidmousavii/netmon/internal/backup"
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/report"
+	"github.com/farshidmousavii/bidar/internal/backup"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/report"
 )
 
 type backupModel struct {

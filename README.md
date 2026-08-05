@@ -1,6 +1,6 @@
-# NetMon
+# Bidar
 
-NetMon is a powerful CLI tool for network device monitoring, configuration backup, and bulk command execution across Cisco and MikroTik devices.
+Bidar is a powerful CLI tool for network device monitoring, configuration backup, and bulk command execution across Cisco and MikroTik devices.
 
 ---
 
@@ -26,15 +26,15 @@ NetMon is a powerful CLI tool for network device monitoring, configuration backu
 Build from Source
 
 ```bash
-git clone https://github.com/farshidmousavii/netmon.git
-cd netmon
-go build -o netmon-cli ./cmd/netmon
+git clone https://github.com/farshidmousavii/bidar.git
+cd bidar
+go build -o bidar ./cmd/bidar
 ```
 
 Run Directly
 
 ```bash
-go run ./cmd/netmon [command]
+go run ./cmd/bidar [command]
 ```
 
 ## Quick Start
@@ -44,13 +44,13 @@ go run ./cmd/netmon [command]
 
 ```bash
 # Creates config.yaml
-./netmon-cli init
+./bidar init
 ```
 
 CSV format (recommended for bulk import):
 
 ```bash
-./netmon-cli init --format csv
+./bidar init --format csv
 ```
 
 2. Edit Configuration
@@ -112,16 +112,16 @@ CSV Settings (optional):
 
 ```bash#
 Monitor with YAML
-./netmon-cli monitor
+./bidar monitor
 
 # Monitor with CSV
-./netmon-cli monitor --config devices.csv
+./bidar monitor --config devices.csv
 
 # Backup only
-./netmon-cli backup
+./bidar backup
 
 # Execute bulk commands
-./netmon-cli exec --type cisco -c "show version"
+./bidar exec --type cisco -c "show version"
 ```
 
 # Commands
@@ -132,25 +132,25 @@ Health check devices with ping and SNMP.
 
 ```bash
 # Basic monitoring
-./netmon-cli monitor
+./bidar monitor
 
 # Skip backup during monitoring
-./netmon-cli monitor --skip-backup
+./bidar monitor --skip-backup
 
 # Skip SNMP queries
-./netmon-cli monitor --skip-snmp
+./bidar monitor --skip-snmp
 
 # JSON output
-./netmon-cli monitor --json
+./bidar monitor --json
 
 # Enable file logging
-./netmon-cli monitor --log
+./bidar monitor --log
 
 # Override SNMP settings
-./netmon-cli monitor --snmp-community private --snmp-timeout 20
+./bidar monitor --snmp-community private --snmp-timeout 20
 
 # Override backup directory
-./netmon-cli monitor --backup-dir /opt/backups
+./bidar monitor --backup-dir /opt/backups
 
 
 Options:
@@ -171,13 +171,13 @@ Backup device configurations.
 
 ```bash
 # Basic backup
-./netmon-cli backup
+./bidar backup
 
 # With logging
-./netmon-cli backup --log
+./bidar backup --log
 
 # JSON output
-./netmon-cli backup --json
+./bidar backup --json
 ```
 
 **Options:**
@@ -204,24 +204,24 @@ Execute commands on devices.
 
 ```bash
 # Single device - show command
-./netmon-cli exec -d core-switch -c "show ip interface brief"
+./bidar exec -d core-switch -c "show ip interface brief"
 #or
-./netmon-cli exec -d 192.168.1.1 -c "show ip interface brief"
+./bidar exec -d 192.168.1.1 -c "show ip interface brief"
 
 # All Cisco devices - config command
-./netmon-cli exec --type cisco -c "interface gi0/1" -c "description UPLINK"
+./bidar exec --type cisco -c "interface gi0/1" -c "description UPLINK"
 
 # With config save (Cisco only)
-./netmon-cli exec -d core-switch -c "interface gi0/1" -c "shutdown" --save
+./bidar exec -d core-switch -c "interface gi0/1" -c "shutdown" --save
 
 # Dry run (preview without execution)
-./netmon-cli exec --type cisco -c "interface gi0/1" -c "shutdown" --dry-run
+./bidar exec --type cisco -c "interface gi0/1" -c "shutdown" --dry-run
 
 # Save output to file
-./netmon-cli exec --type cisco -c "show running-config" -o output.txt
+./bidar exec --type cisco -c "show running-config" -o output.txt
 
 # Interactive mode
-./netmon-cli exec --type cisco
+./bidar exec --type cisco
 # Enter commands one per line, empty line to finish
 Target Selection (choose one):
 
@@ -248,23 +248,23 @@ All other commands → Config mode (automatic conf t → commands → end)
 
 ```bash
 # Show command (auto-detected)
-./netmon-cli exec -d core-switch -c "show ip route"
+./bidar exec -d core-switch -c "show ip route"
 
 # Config commands (auto-detected, enters config mode)
-./netmon-cli exec --type cisco \
+./bidar exec --type cisco \
   -c "interface gi0/1" \
   -c "description UPLINK_TO_CORE" \
   -c "no shutdown" \
   --save
 
 # Dry run to preview
-./netmon-cli exec --type cisco \
+./bidar exec --type cisco \
   -c "interface gi0/1" \
   -c "shutdown" \
   --dry-run
 
 # Execute and save output
-./netmon-cli exec --type cisco -c "show run" -o configs.txt
+./bidar exec --type cisco -c "show run" -o configs.txt
 ```
 
 # diff
@@ -272,7 +272,7 @@ All other commands → Config mode (automatic conf t → commands → end)
 Compare two backup files.
 
 ```bash
-./netmon-cli diff backups/cisco/2026-04-20_10-00/Core-Switch.txt \
+./bidar diff backups/cisco/2026-04-20_10-00/Core-Switch.txt \
                    backups/cisco/2026-04-20_11-00/Core-Switch.txt
 ```
 
@@ -299,10 +299,10 @@ Initialize configuration files.
 
 ```bash
 # Create YAML config (default)
-./netmon-cli init
+./bidar init
 
 # Create CSV config
-./netmon-cli init --format csv
+./bidar init --format csv
 Options:
 
 --format <yaml|csv> — Config format (default: yaml)
@@ -324,9 +324,9 @@ Auto-detection:
 ## Examples:
 
 ```bash
-./netmon-cli monitor --config devices.csv
-./netmon-cli backup --config /etc/netmon/config.yaml
-./netmon-cli exec --config production.csv --type cisco -c "show version"
+./bidar monitor --config devices.csv
+./bidar backup --config /etc/bidar/config.yaml
+./bidar exec --config production.csv --type cisco -c "show version"
 ```
 
 ## Configuration
@@ -401,54 +401,54 @@ Archive path: empty (no archiving)
 
 ```bash
 # Basic monitoring (YAML config)
-./netmon-cli monitor
+./bidar monitor
 
 # Monitor with CSV, override SNMP settings
-./netmon-cli monitor --config devices.csv \
+./bidar monitor --config devices.csv \
   --snmp-community private \
   --snmp-timeout 20
 
 # Monitor without SNMP
-./netmon-cli monitor --skip-snmp
+./bidar monitor --skip-snmp
 
 # Monitor with logging and JSON output
-./netmon-cli monitor --log --json > report.json
+./bidar monitor --log --json > report.json
 ```
 
 ## Backup
 
 ```bash
 # Backup all devices
-./netmon-cli backup
+./bidar backup
 
 # Backup with custom directory
-./netmon-cli monitor --backup-dir /mnt/backups
+./bidar monitor --backup-dir /mnt/backups
 
 # Backup with archiving
-./netmon-cli monitor --backup-archive /mnt/archive
+./bidar monitor --backup-archive /mnt/archive
 ```
 
 ## Bulk Execution
 
 ```bash
 # Check version on all Cisco devices
-./netmon-cli exec --type cisco -c "show version"
+./bidar exec --type cisco -c "show version"
 
 # Configure interface on specific device
-./netmon-cli exec -d core-switch \
+./bidar exec -d core-switch \
   -c "interface gi0/1" \
   -c "description UPLINK_TO_DATACENTER" \
   -c "no shutdown" \
   --save
 
 # Dry run before execution
-./netmon-cli exec --type cisco \
+./bidar exec --type cisco \
   -c "no ip http server" \
   -c "no ip http secure-server" \
   --dry-run
 
 # Interactive mode
-./netmon-cli exec --type cisco
+./bidar exec --type cisco
 Enter commands (one per line, empty line to finish):
 interface gi0/1
 description MGMT_INTERFACE
@@ -467,7 +467,7 @@ Continue? (yes/no): yes
 Compare two backup files
 
 ```bash
-./netmon-cli diff \
+./bidar diff \
   backups/cisco/2026-04-19_23-00/Core-Switch.txt \
   backups/cisco/2026-04-20_11-00/Core-Switch.txt
 ```
@@ -568,7 +568,7 @@ Summary:
 │   │   ├── exec.go        # Bulk execution command
 │   │   ├── diff.go        # Config comparison command
 │   │   └── init.go        # Config initialization
-│   └── netmon/
+│   └── bidar/
 │       └── main.go        # Entry point
 ├── internal/
 │   ├── backup/

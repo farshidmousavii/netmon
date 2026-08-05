@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/farshidmousavii/netmon/cmd/cli"
-	"github.com/farshidmousavii/netmon/internal/logger"
+	"github.com/farshidmousavii/bidar/cmd/cli"
+	"github.com/farshidmousavii/bidar/internal/logger"
 )
 
 func main() {

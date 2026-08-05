@@ -7,9 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/device"
-	"github.com/farshidmousavii/netmon/internal/report"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/device"
+	"github.com/farshidmousavii/bidar/internal/report"
 )
 
 // overviewState - cached monitor results (persist across TUI screens)

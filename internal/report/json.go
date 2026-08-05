@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/farshidmousavii/netmon/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/logger"
 )
 
 func ReportToJson(allReports []DeviceReport) error {

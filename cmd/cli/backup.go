@@ -4,10 +4,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/farshidmousavii/netmon/internal/backup"
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/logger"
-	"github.com/farshidmousavii/netmon/internal/report"
+	"github.com/farshidmousavii/bidar/internal/backup"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/report"
 	"github.com/spf13/cobra"
 )
 

@@ -3,15 +3,15 @@ package cli
 import (
 	"log"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/logger"
 	"github.com/spf13/cobra"
 )
 
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Interactive terminal UI",
-	Long: `Launch the interactive terminal user interface for NetMon.
+	Long: `Launch the interactive terminal user interface for Bidar.
 Browse devices, scan for err-disabled ports, fix port-security violations.`,
 	Run: runTUICmd,
 }

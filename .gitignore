@@ -14,8 +14,7 @@ config.yaml
 .env
 
 # Build outputs
-netmon-cli
-netmon
+bidar
 *.exe
 dist/
 bin/

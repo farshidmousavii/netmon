@@ -79,7 +79,7 @@ ssh:
 		fmt.Println("✓ config.yaml created")
 		fmt.Println("\nNext steps:")
 		fmt.Println("  1. Edit config.yaml with your credentials")
-		fmt.Println("  2. Run: netmon-cli monitor")
+		fmt.Println("  2. Run: bidar monitor")
 	}
 }
 
@@ -108,6 +108,6 @@ edge-router,192.168.3.1,22,mikrotik,admin,changeme
 		fmt.Println("✓ devices.csv created")
 		fmt.Println("\nNext steps:")
 		fmt.Println("  1. Edit devices.csv with your devices")
-		fmt.Println("  2. Run: netmon-cli monitor --config devices.csv")
+		fmt.Println("  2. Run: bidar monitor --config devices.csv")
 	}
 }

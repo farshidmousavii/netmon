@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/farshidmousavii/netmon/internal/config"
+	"github.com/farshidmousavii/bidar/internal/config"
 )
 
 // ─── Semantic color palette (Catppuccin Mocha-inspired) ───
@@ -243,7 +243,7 @@ var menuKeys = [][2]string{
 
 func (m MenuModel) View() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(" NetMon ") + "\n\n")
+	b.WriteString(titleStyle.Render(" Bidar ") + "\n\n")
 
 	for i, opt := range m.options {
 		cursor := "  "

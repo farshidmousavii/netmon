@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/logger"
-	"github.com/farshidmousavii/netmon/internal/report"
-	"github.com/farshidmousavii/netmon/internal/snmp"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/report"
+	"github.com/farshidmousavii/bidar/internal/snmp"
 )
 
 func CheckDevice(ctx context.Context, deviceCfg config.DeviceConfig, cfg *config.Config, reports chan<- report.DeviceReport, skipBackup bool) {

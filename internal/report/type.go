@@ -1,6 +1,6 @@
 package report
 
-import "github.com/farshidmousavii/netmon/internal/snmp"
+import "github.com/farshidmousavii/bidar/internal/snmp"
 
 type DeviceReport struct {
 	Name       string

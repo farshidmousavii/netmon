@@ -1,4 +1,4 @@
-module github.com/farshidmousavii/netmon
+module github.com/farshidmousavii/bidar
 
 go 1.25.7
 

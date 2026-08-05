@@ -6,8 +6,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/retry"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/retry"
 	"golang.org/x/crypto/ssh"
 )
 

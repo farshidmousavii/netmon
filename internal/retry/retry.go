@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/logger"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/logger"
 )
 
 // Do - execute function with retry

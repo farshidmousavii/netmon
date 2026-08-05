@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/farshidmousavii/netmon/internal/config"
-	"github.com/farshidmousavii/netmon/internal/snmp"
+	"github.com/farshidmousavii/bidar/internal/config"
+	"github.com/farshidmousavii/bidar/internal/snmp"
 )
 
 func (d Device) GetHostName(config string, deviceType string) (string, error) {

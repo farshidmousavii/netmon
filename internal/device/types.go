@@ -1,7 +1,7 @@
 package device
 
 import (
-	"github.com/farshidmousavii/netmon/internal/config"
+	"github.com/farshidmousavii/bidar/internal/config"
 )
 
 type Device struct {

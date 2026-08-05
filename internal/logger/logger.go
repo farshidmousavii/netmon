@@ -66,7 +66,7 @@ func createLogFile()(*os.File , error){
 	if err := os.MkdirAll("log" , 0755) ; err != nil {
 		return nil , err
 	}
-	filename := fmt.Sprintf("log/netmon_%s.log" , time.Now().Format("2006-01-02_15-04-05"))
+	filename := fmt.Sprintf("log/bidar_%s.log" , time.Now().Format("2006-01-02_15-04-05"))
 	return os.OpenFile(filename , os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 
 }
