@@ -28,8 +28,8 @@ func TestBuildOutputLines(t *testing.T) {
 	}
 	m.outLines = lines
 
-	if len(m.outLines) != 8 { // 2 headers + 5 content + 2 blanks
-		t.Fatalf("lines=%d, want 8: %v", len(m.outLines), m.outLines)
+	if len(m.outLines) != 9 { // SW1: 1 header + 4 content + 1 blank, SW2: 1+1+1
+		t.Fatalf("lines=%d, want 9: %v", len(m.outLines), m.outLines)
 	}
 	if m.outLines[0] != "✓ SW1" {
 		t.Fatalf("line0=%q, want ✓ SW1", m.outLines[0])
