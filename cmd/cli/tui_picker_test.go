@@ -222,3 +222,42 @@ func TestDeviceListScrollFollowsCursor(t *testing.T) {
 		t.Fatalf("pgup: cursor=%d offset=%d, want 0/0", m.cursor, m.offset)
 	}
 }
+
+func TestDeviceVendorTypeFilter(t *testing.T) {
+	m := &deviceListModel{
+		devices: []config.DeviceConfig{
+			{Name: "R1", Vendor: "cisco", Type: "router"},
+			{Name: "SW1", Vendor: "cisco", Type: "switch"},
+			{Name: "MK1", Vendor: "mikrotik", Type: "router"},
+			{Name: "CAP1", Vendor: "mikrotik", Type: "access_point"},
+		},
+		loading: false,
+	}
+	m.applyFilter()
+	if len(m.filtered) != 4 {
+		t.Fatalf("all: %d, want 4", len(m.filtered))
+	}
+	// vendor filter
+	m.vendorFilter = "cisco"
+	m.applyFilter()
+	if len(m.filtered) != 2 {
+		t.Fatalf("cisco: %d, want 2", len(m.filtered))
+	}
+	// type options for cisco
+	opts := m.typeOptions()
+	if len(opts) != 2 || opts[0] != "router" || opts[1] != "switch" {
+		t.Fatalf("cisco types: %v", opts)
+	}
+	// vendor + type
+	m.typeFilter = "switch"
+	m.applyFilter()
+	if len(m.filtered) != 1 || m.filtered[0].Name != "SW1" {
+		t.Fatalf("cisco+switch: %v", m.filtered)
+	}
+	// clear
+	m.vendorFilter, m.typeFilter = "", ""
+	m.applyFilter()
+	if len(m.filtered) != 4 {
+		t.Fatalf("cleared: %d, want 4", len(m.filtered))
+	}
+}

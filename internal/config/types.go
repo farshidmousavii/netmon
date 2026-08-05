@@ -23,6 +23,7 @@ type DeviceConfig struct {
 	Port       string `yaml:"port"`
 	Vendor     string `yaml:"vendor"`
 	Credential string `yaml:"credential"`
+	Type       string `yaml:"type,omitempty"` // router, switch, firewall, etc.
 }
 
 type CredentialInfo struct {

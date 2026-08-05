@@ -28,6 +28,11 @@ type deviceListModel struct {
 	filtering  bool // in filter input mode
 	configPath string
 	switchMode bool // cisco switch list: enter opens Switch Details
+	// vendor/type filter chain: "" = all
+	vendorFilter string
+	typeFilter   string
+	filterStage  int // 0=list, 1=choose vendor, 2=choose type
+	filterCursor int // cursor in vendor/type picker
 	// form state (add/edit)
 	formMode   string // "", "add", "edit", "confirm-delete"
 	formField  int
@@ -36,7 +41,7 @@ type deviceListModel struct {
 }
 
 // formLabels - device form fields in order
-var formLabels = []string{"Name", "IP", "Vendor (cisco/mikrotik)", "Credential", "Port (22)"}
+var formLabels = []string{"Name", "IP", "Vendor (cisco/mikrotik)", "Type (router/switch/firewall)", "Credential", "Port (22)"}
 
 func newDeviceListModel(cfg *config.Config) *deviceListModel {
 	return newDeviceListModelFiltered(cfg, "")
@@ -67,9 +72,9 @@ func (m *deviceListModel) startForm(mode string) {
 	m.formErr = ""
 	if mode == "edit" && len(m.filtered) > 0 && m.cursor < len(m.filtered) {
 		d := m.filtered[m.cursor]
-		m.formFields = []string{d.Name, d.IP, d.Vendor, d.Credential, d.Port}
+		m.formFields = []string{d.Name, d.IP, d.Vendor, d.Type, d.Credential, d.Port}
 	} else {
-		m.formFields = []string{"", "", "cisco", "", "22"}
+		m.formFields = []string{"", "", "cisco", "switch", "", "22"}
 	}
 }
 
@@ -79,8 +84,9 @@ func (m *deviceListModel) formDevice() (config.DeviceConfig, error) {
 		Name:       strings.TrimSpace(m.formFields[0]),
 		IP:         strings.TrimSpace(m.formFields[1]),
 		Vendor:     strings.ToLower(strings.TrimSpace(m.formFields[2])),
-		Credential: strings.TrimSpace(m.formFields[3]),
-		Port:       strings.TrimSpace(m.formFields[4]),
+		Type:       strings.ToLower(strings.TrimSpace(m.formFields[3])),
+		Credential: strings.TrimSpace(m.formFields[4]),
+		Port:       strings.TrimSpace(m.formFields[5]),
 	}
 	if d.Name == "" || d.IP == "" {
 		return d, fmt.Errorf("name and IP are required")
@@ -143,15 +149,26 @@ func (m *deviceListModel) load() {
 }
 
 func (m *deviceListModel) applyFilter() {
+	var base []config.DeviceConfig
+	for _, d := range m.devices {
+		if m.vendorFilter != "" && !strings.EqualFold(d.Vendor, m.vendorFilter) {
+			continue
+		}
+		if m.typeFilter != "" && !strings.EqualFold(d.Type, m.typeFilter) {
+			continue
+		}
+		base = append(base, d)
+	}
 	if m.query == "" {
-		m.filtered = m.devices
+		m.filtered = base
 	} else {
 		q := strings.ToLower(m.query)
 		var f []config.DeviceConfig
-		for _, d := range m.devices {
+		for _, d := range base {
 			if strings.Contains(strings.ToLower(d.Name), q) ||
 				strings.Contains(d.IP, q) ||
-				strings.Contains(strings.ToLower(d.Vendor), q) {
+				strings.Contains(strings.ToLower(d.Vendor), q) ||
+				strings.Contains(strings.ToLower(d.Type), q) {
 				f = append(f, d)
 			}
 		}
@@ -162,11 +179,73 @@ func (m *deviceListModel) applyFilter() {
 	m.offset = 0
 }
 
+// vendorOptions - distinct vendors + "All"
+func (m *deviceListModel) vendorOptions() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range m.devices {
+		v := strings.ToLower(d.Vendor)
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// typeOptions - distinct types for current vendor + "All"
+func (m *deviceListModel) typeOptions() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range m.devices {
+		if m.vendorFilter != "" && !strings.EqualFold(d.Vendor, m.vendorFilter) {
+			continue
+		}
+		t := strings.ToLower(d.Type)
+		if t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func (m deviceListModel) Init() tea.Cmd { return nil }
 
 func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// vendor/type selection stage
+		if m.filterStage == 1 || m.filterStage == 2 {
+			opts := m.vendorOptions()
+			if m.filterStage == 2 {
+				opts = m.typeOptions()
+			}
+			switch msg.String() {
+			case "up", "k":
+				if m.filterCursor > 0 {
+					m.filterCursor--
+				}
+			case "down", "j":
+				if m.filterCursor < len(opts) {
+					m.filterCursor++
+				}
+			case "enter":
+				if m.filterCursor < len(opts) {
+					if m.filterStage == 1 {
+						m.vendorFilter = opts[m.filterCursor]
+						m.typeFilter = ""
+					} else {
+						m.typeFilter = opts[m.filterCursor]
+					}
+					m.filterStage = 0
+					m.applyFilter()
+				}
+			case "esc", "q", "b":
+				m.filterStage = 0
+			}
+			return m, nil
+		}
 		// form mode: handle input
 		if m.formMode == "confirm-delete" {
 			switch msg.String() {
@@ -293,6 +372,26 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.query = ""
 			m.applyFilter()
 			return m, nil
+		case "v":
+			// choose vendor
+			m.filterStage = 1
+			m.filterCursor = 0
+			return m, nil
+		case "t":
+			// choose type (for current vendor)
+			if len(m.typeOptions()) > 0 {
+				m.filterStage = 2
+				m.filterCursor = 0
+			}
+			return m, nil
+		case "x":
+			// clear vendor/type filters
+			if m.vendorFilter != "" || m.typeFilter != "" {
+				m.vendorFilter = ""
+				m.typeFilter = ""
+				m.applyFilter()
+			}
+			return m, nil
 		case "a":
 			m.startForm("add")
 			return m, nil
@@ -356,15 +455,55 @@ func (m deviceListModel) View() string {
 		return b.String()
 	}
 
+	// vendor/type picker stage
+	if m.filterStage == 1 || m.filterStage == 2 {
+		opts := m.vendorOptions()
+		title := "Choose vendor"
+		if m.filterStage == 2 {
+			opts = m.typeOptions()
+			title = "Choose type (vendor: " + m.vendorFilter + ")"
+		}
+		// "All" option at the end
+		b.WriteString(accStyle.Render(" "+title+" ") + "\n\n")
+		for i, o := range opts {
+			marker := "  "
+			style := dimStyle
+			if i == m.filterCursor {
+				marker = "▸ "
+				style = accStyle
+			}
+			b.WriteString(marker + style.Render(o) + "\n")
+		}
+		// All option
+		allIdx := len(opts)
+		marker := "  "
+		style := dimStyle
+		if allIdx == m.filterCursor {
+			marker = "▸ "
+			style = accStyle
+		}
+		b.WriteString(marker + style.Render("all") + "\n")
+		return b.String()
+	}
+
 	// filter input bar — shown whenever filtering
 	if m.filtering {
 		b.WriteString(accStyle.Render("/ "+m.query+"▌") + "  " +
 			dimStyle.Render("filter (enter done · esc cancel)") + "\n\n")
 	}
 
+	// active filter indicator
+	if m.vendorFilter != "" || m.typeFilter != "" {
+		f := "vendor: " + m.vendorFilter
+		if m.typeFilter != "" {
+			f += " · type: " + m.typeFilter
+		}
+		b.WriteString(dimStyle.Render("filter: "+f+"  (x clear)") + "\n\n")
+	}
+
 	// header
-	b.WriteString(dimStyle.Render(fmt.Sprintf("%-2s %-22s %-16s %-10s", "", "NAME", "IP", "VENDOR")) + "\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", 52)) + "\n")
+	b.WriteString(dimStyle.Render(fmt.Sprintf("%-2s %-22s %-16s %-10s %s", "", "NAME", "IP", "VENDOR", "TYPE")) + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("─", 62)) + "\n")
 
 	if m.loading {
 		b.WriteString(dimStyle.Render("Loading...\n"))
@@ -386,6 +525,7 @@ func (m deviceListModel) View() string {
 		nameCol := lipgloss.NewStyle().Width(22)
 		ipCol := lipgloss.NewStyle().Width(16)
 		vendorCol := lipgloss.NewStyle().Width(10)
+		typeCol := lipgloss.NewStyle().Width(12)
 
 		for i := start; i < end; i++ {
 			d := m.filtered[i]
@@ -395,11 +535,12 @@ func (m deviceListModel) View() string {
 				cursor = "▸ "
 				style = accStyle
 			}
-			b.WriteString(fmt.Sprintf("%s %s%s%s\n",
+			b.WriteString(fmt.Sprintf("%s %s%s%s%s\n",
 				cursor,
 				nameCol.Render(style.Render(d.Name)),
 				ipCol.Render(style.Render(d.IP)),
-				vendorCol.Render(style.Render(d.Vendor))))
+				vendorCol.Render(style.Render(d.Vendor)),
+				typeCol.Render(style.Render(d.Type))))
 		}
 	}
 
