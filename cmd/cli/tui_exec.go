@@ -39,6 +39,14 @@ func (m *quickExecModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if confirm {
 				if len(m.picker.SelectedDevices()) == 0 {
+					// no selection: fall back to hovered device
+					f := m.picker.Filtered()
+					if len(f) > 0 && m.picker.Cursor < len(f) {
+						name := f[m.picker.Cursor].Name
+						m.picker.Selected[name] = true
+					}
+				}
+				if len(m.picker.SelectedDevices()) == 0 {
 					return m, nil
 				}
 				m.mode = "input"
