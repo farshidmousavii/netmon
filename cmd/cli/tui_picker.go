@@ -67,14 +67,36 @@ func (p *DevicePicker) CountSelected() int {
 
 // HandleKey - returns (handled, back, confirm)
 func (p *DevicePicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
+	// viewport window for cursor clamping
+	window := func() (int, int) {
+		f := p.Filtered()
+		if len(f) == 0 {
+			return 0, 0
+		}
+		end := p.Offset + p.PageSize
+		if end > len(f) {
+			end = len(f)
+		}
+		return p.Offset, end
+	}
 	switch msg.String() {
 	case "up", "k":
 		if p.Cursor > 0 {
 			p.Cursor--
+			// scroll up if cursor left the window
+			if p.Cursor < p.Offset {
+				p.Offset = p.Cursor
+			}
 		}
 	case "down", "j":
-		if p.Cursor < len(p.Devices)-1 {
+		f := p.Filtered()
+		if p.Cursor < len(f)-1 {
 			p.Cursor++
+			// scroll down if cursor passed window end
+			_, end := window()
+			if p.Cursor >= end {
+				p.Offset++
+			}
 		}
 	case "g", "home":
 		p.Cursor = 0
@@ -104,9 +126,12 @@ func (p *DevicePicker) HandleKey(msg tea.KeyMsg) (bool, bool, bool) {
 		if p.Offset < 0 {
 			p.Offset = 0
 		}
+		p.Cursor = p.Offset
 	case "pgdown", "right":
-		if p.Offset+p.PageSize < len(p.Filtered()) {
+		f := p.Filtered()
+		if len(f) > 0 && p.Offset+p.PageSize < len(f) {
 			p.Offset += p.PageSize
+			p.Cursor = p.Offset
 		}
 	case "/":
 		p.Query = ""
