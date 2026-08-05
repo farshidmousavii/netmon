@@ -1,11 +1,20 @@
 package config
 
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
+
 type Config struct {
 	Devices     []DeviceConfig            `yaml:"devices"`
 	SNMP        *SNMPConfig               `yaml:"snmp,omitempty"`
 	Backup      BackupConfig              `yaml:"backup"`
 	Credentials map[string]CredentialInfo `yaml:"credentials"`
 	SSH         *SSHSettings              `yaml:"ssh,omitempty"`
+	Version     int                       `yaml:"version,omitempty"`
 }
 
 type DeviceConfig struct {
@@ -61,4 +70,51 @@ func (c *Config) GetSSHSettings() *SSHSettings {
 		return c.SSH
 	}
 	return DefaultSSHSettings()
+}
+
+// Save - write config back to disk atomically with a .bak backup.
+// Writes to a temp file then renames (never a half-written config).
+func (c *Config) Save(path string) error {
+	if c.Version == 0 {
+		c.Version = 1
+	}
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	// backup existing file before overwrite
+	if _, err := os.Stat(path); err == nil {
+		bak := path + ".bak"
+		if err := copyFile(path, bak); err != nil {
+			return fmt.Errorf("backup config: %w", err)
+		}
+	}
+
+	// atomic write: temp + rename
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }

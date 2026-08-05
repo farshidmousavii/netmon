@@ -16,22 +16,105 @@ type deviceListMsg struct {
 }
 
 type deviceListModel struct {
-	cfg       *config.Config
-	devices   []config.DeviceConfig
-	loading   bool
-	err       error
-	cursor    int
-	offset    int
-	pageSize  int
-	query     string
-	filtered  []config.DeviceConfig
-	filtering bool // in filter input mode
+	cfg        *config.Config
+	devices    []config.DeviceConfig
+	loading    bool
+	err        error
+	cursor     int
+	offset     int
+	pageSize   int
+	query      string
+	filtered   []config.DeviceConfig
+	filtering  bool // in filter input mode
+	configPath string
+	// form state (add/edit)
+	formMode   string // "", "add", "edit", "confirm-delete"
+	formField  int
+	formFields []string // current field values
+	formErr    string
 }
 
+// formLabels - device form fields in order
+var formLabels = []string{"Name", "IP", "Vendor (cisco/mikrotik)", "Credential", "Port (22)"}
+
 func newDeviceListModel(cfg *config.Config) *deviceListModel {
-	m := &deviceListModel{cfg: cfg, pageSize: 15, loading: true}
+	m := &deviceListModel{cfg: cfg, pageSize: 15, loading: true, configPath: configPath}
 	m.load()
 	return m
+}
+
+func (m *deviceListModel) startForm(mode string) {
+	m.formMode = mode
+	m.formField = 0
+	m.formErr = ""
+	if mode == "edit" && len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+		d := m.filtered[m.cursor]
+		m.formFields = []string{d.Name, d.IP, d.Vendor, d.Credential, d.Port}
+	} else {
+		m.formFields = []string{"", "", "cisco", "", "22"}
+	}
+}
+
+// formDevice - build DeviceConfig from form fields (validate)
+func (m *deviceListModel) formDevice() (config.DeviceConfig, error) {
+	d := config.DeviceConfig{
+		Name:       strings.TrimSpace(m.formFields[0]),
+		IP:         strings.TrimSpace(m.formFields[1]),
+		Vendor:     strings.ToLower(strings.TrimSpace(m.formFields[2])),
+		Credential: strings.TrimSpace(m.formFields[3]),
+		Port:       strings.TrimSpace(m.formFields[4]),
+	}
+	if d.Name == "" || d.IP == "" {
+		return d, fmt.Errorf("name and IP are required")
+	}
+	if d.Vendor != "cisco" && d.Vendor != "mikrotik" {
+		return d, fmt.Errorf("vendor must be cisco or mikrotik")
+	}
+	if d.Credential == "" {
+		d.Credential = "default"
+	}
+	if d.Port == "" {
+		d.Port = "22"
+	}
+	return d, nil
+}
+
+func (m *deviceListModel) saveDevice(d config.DeviceConfig, isEdit bool, oldName string) error {
+	if isEdit {
+		for i := range m.cfg.Devices {
+			if m.cfg.Devices[i].Name == oldName {
+				m.cfg.Devices[i] = d
+				break
+			}
+		}
+	} else {
+		m.cfg.Devices = append(m.cfg.Devices, d)
+	}
+	if err := m.cfg.Save(m.configPath); err != nil {
+		return err
+	}
+	m.load() // refresh from cfg
+	m.applyFilter()
+	return nil
+}
+
+func (m *deviceListModel) deleteDevice() error {
+	if len(m.filtered) == 0 || m.cursor >= len(m.filtered) {
+		return fmt.Errorf("no device selected")
+	}
+	name := m.filtered[m.cursor].Name
+	for i := range m.cfg.Devices {
+		if m.cfg.Devices[i].Name == name {
+			m.cfg.Devices = append(m.cfg.Devices[:i], m.cfg.Devices[i+1:]...)
+			break
+		}
+	}
+	if err := m.cfg.Save(m.configPath); err != nil {
+		return err
+	}
+	m.load()
+	m.applyFilter()
+	return nil
 }
 
 func (m *deviceListModel) load() {
@@ -66,6 +149,64 @@ func (m deviceListModel) Init() tea.Cmd { return nil }
 func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// form mode: handle input
+		if m.formMode == "confirm-delete" {
+			switch msg.String() {
+			case "y", "Y":
+				if err := m.deleteDevice(); err != nil {
+					m.formErr = err.Error()
+				}
+				m.formMode = ""
+				return m, nil
+			case "n", "N", "esc", "q":
+				m.formMode = ""
+				return m, nil
+			}
+			return m, nil
+		}
+		if m.formMode == "add" || m.formMode == "edit" {
+			switch msg.String() {
+			case "esc", "q":
+				m.formMode = ""
+				return m, nil
+			case "tab", "enter":
+				if m.formField < len(m.formFields)-1 {
+					m.formField++
+				} else {
+					// save on last field
+					d, err := m.formDevice()
+					if err != nil {
+						m.formErr = err.Error()
+						return m, nil
+					}
+					oldName := ""
+					if m.formMode == "edit" && len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+						oldName = m.filtered[m.cursor].Name
+					}
+					if err := m.saveDevice(d, m.formMode == "edit", oldName); err != nil {
+						m.formErr = err.Error()
+						return m, nil
+					}
+					m.formMode = ""
+					return m, nil
+				}
+			case "shift+tab":
+				if m.formField > 0 {
+					m.formField--
+				}
+			case "backspace":
+				if len(m.formFields[m.formField]) > 0 {
+					m.formFields[m.formField] = m.formFields[m.formField][:len(m.formFields[m.formField])-1]
+				}
+			case "ctrl+c":
+				return m, tea.Quit
+			default:
+				if len(msg.String()) == 1 {
+					m.formFields[m.formField] += msg.String()
+				}
+			}
+			return m, nil
+		}
 		// filter input mode: everything goes to the query
 		if m.filtering {
 			switch msg.String() {
@@ -132,6 +273,20 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// enter filter input mode
 			m.filtering = true
 			return m, nil
+		case "a":
+			m.startForm("add")
+			return m, nil
+		case "e":
+			if len(m.filtered) > 0 {
+				m.startForm("edit")
+			}
+			return m, nil
+		case "d":
+			if len(m.filtered) > 0 {
+				m.formMode = "confirm-delete"
+				m.formErr = ""
+			}
+			return m, nil
 		default:
 			// ignore stray chars when not filtering
 		}
@@ -142,6 +297,38 @@ func (m deviceListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m deviceListModel) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Device List ") + "\n\n")
+
+	// form view (add/edit)
+	if m.formMode == "add" || m.formMode == "edit" {
+		b.WriteString(accStyle.Render(" "+m.formMode+" device ") + "\n\n")
+		for i, label := range formLabels {
+			cursor := "  "
+			if i == m.formField {
+				cursor = "▸ "
+			}
+			val := m.formFields[i]
+			if i == m.formField {
+				val += "▌"
+			}
+			b.WriteString(fmt.Sprintf("%s %-28s %s\n", cursor, dimStyle.Render(label), accStyle.Render(val)))
+		}
+		if m.formErr != "" {
+			b.WriteString("\n" + errStyle.Render("✗ "+m.formErr) + "\n")
+		}
+		b.WriteString("\n" + renderFooter("tab/enter", "next · save", "shift+tab", "prev", "esc", "cancel"))
+		return b.String()
+	}
+
+	// delete confirmation
+	if m.formMode == "confirm-delete" {
+		name := ""
+		if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+			name = m.filtered[m.cursor].Name
+		}
+		b.WriteString(warnStyle.Render("Delete device "+name+"? This edits config.yaml (backup saved).") + "\n\n")
+		b.WriteString(renderFooter("y", "delete", "n/esc", "cancel"))
+		return b.String()
+	}
 
 	// filter input bar — shown whenever filtering
 	if m.filtering {
@@ -196,7 +383,7 @@ func (m deviceListModel) View() string {
 	if m.query != "" {
 		b.WriteString(dimStyle.Render(fmt.Sprintf(" · filter: %q", m.query)))
 	}
-	b.WriteString("\n" + renderFooter("↑/↓", "nav", "←/→", "page", "/", "filter", "esc", "back"))
+	b.WriteString("\n" + renderFooter("↑/↓", "nav", "←/→", "page", "/", "filter", "a", "add", "e", "edit", "d", "del", "esc", "back"))
 	return b.String()
 }
 
