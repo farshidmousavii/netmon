@@ -16,6 +16,7 @@ type quickExecModel struct {
 	input   string
 	mode    string // "pick" | "input" | "running" | "done"
 	results []taskResult
+	scroll  int
 }
 
 func newQuickExecModel(cfg *config.Config) *quickExecModel {
@@ -89,7 +90,25 @@ func (m *quickExecModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				m.mode = "pick"
 				m.results = nil
+				m.scroll = 0
 				return m, nil
+			case "up", "k":
+				if m.scroll > 0 {
+					m.scroll--
+				}
+			case "down", "j":
+				m.scroll++
+			case "pgup", "left":
+				m.scroll -= 20
+				if m.scroll < 0 {
+					m.scroll = 0
+				}
+			case "pgdown", "right":
+				m.scroll += 20
+			case "home", "g":
+				m.scroll = 0
+			case "end", "G":
+				m.scroll = len(m.results)
 			}
 		}
 	case taskDoneMsg:
@@ -120,10 +139,6 @@ func (m *quickExecModel) runExec(devices []config.DeviceConfig, cmd string) tea.
 		if err != nil {
 			return "", err
 		}
-		// truncate long output for TUI display
-		if len(out) > 400 {
-			out = out[:400] + "...\n[truncated]"
-		}
 		return out, nil
 	})
 }
@@ -147,14 +162,33 @@ func (m *quickExecModel) View() string {
 	case "done":
 		var b strings.Builder
 		b.WriteString(titleStyle.Render(" Quick Exec Results ") + "\n\n")
+		// skip results scrolled past (one result block = device header + status lines)
+		skipped := 0
+		shown := 0
 		for _, r := range m.results {
+			block := 2 // header + status
+			if r.err == nil && strings.Count(r.status, "\n") > 0 {
+				block = 2 + strings.Count(r.status, "\n")
+			}
+			if skipped < m.scroll {
+				skipped += block
+				continue
+			}
+			if shown >= 20 {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("… %d more result(s) below — ↓/pgdn to scroll\n", len(m.results)-m.scroll-shown)))
+				break
+			}
 			if r.err != nil {
 				b.WriteString(fmt.Sprintf("  %s %s — %s\n", errStyle.Render("✗"), deviceStyle.Render(r.name), errStyle.Render(r.err.Error())))
 			} else {
 				b.WriteString(fmt.Sprintf("  %s %s\n%s\n\n", okStyle.Render("✓"), deviceStyle.Render(r.name), dimStyle.Render(r.status)))
 			}
+			shown++
 		}
-		b.WriteString(renderFooter("esc/b", "back", "r", "re-run"))
+		if len(m.results) > 20 || m.scroll > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("scroll %d · ", m.scroll)))
+		}
+		b.WriteString(renderFooter("↑/↓", "scroll", "esc/b", "back", "r", "re-run"))
 		return b.String()
 	default:
 		return m.picker.View()
