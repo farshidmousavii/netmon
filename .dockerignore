@@ -1,0 +1,22 @@
+# Keep the build context small and free of secrets.
+.git
+.gitattributes
+AGENTS.md
+README.md
+docs/
+backups/
+reports/
+log/
+logs/
+*.log
+config.yaml
+*.csv
+.env
+*.bak
+*.tmp
+bidar
+dist/
+bin/
+.mypy_cache
+.omh
+.tmp

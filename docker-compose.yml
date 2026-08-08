@@ -1,0 +1,64 @@
+# Bidar stack: postgres -> migrate (one-shot) -> bidar serve.
+#
+# IMPORTANT: `docker compose up` does NOT "just work" with the stock
+# .env.example. BIDAR_MASTER_KEY's placeholder is deliberately invalid
+# base64, so the bidar (serve) service fails fast with a decode error
+# until you set a real key:
+#
+#   cp .env.example .env
+#   BIDAR_MASTER_KEY=$(openssl rand -base64 32)   # then put it in .env
+#
+# migrate itself runs fine without a real key (it never touches encrypted
+# data); serve is the fail-fast gate, and its error message says exactly
+# what to do.
+
+name: bidar
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Named volume: data survives container recreation and compose down
+      # (without -v).
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    command: ["migrate"]
+    environment:
+      # Host is the compose service name, not localhost.
+      BIDAR_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BIDAR_MASTER_KEY: ${BIDAR_MASTER_KEY}
+      BIDAR_LOG_LEVEL: ${BIDAR_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no" # one-shot job: run once and exit
+
+  bidar:
+    build: .
+    command: ["serve"]
+    environment:
+      BIDAR_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BIDAR_MASTER_KEY: ${BIDAR_MASTER_KEY}
+      BIDAR_LOG_LEVEL: ${BIDAR_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

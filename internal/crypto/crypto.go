@@ -89,7 +89,7 @@ func NewFromEnv() (*Encryptor, error) {
 
 	key, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", envconfig.MasterKey, err)
+		return nil, fmt.Errorf("decode %s: %w (generate a real key with `openssl rand -base64 32`; the .env.example placeholder is intentionally invalid)", envconfig.MasterKey, err)
 	}
 
 	return New(key)

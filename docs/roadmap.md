@@ -60,6 +60,7 @@ DoD:
 
 - **Verify the `ParseVendorSNMP` fix against a live device capture.** Phase 0 verified it against `gosnmp`'s source and official vendor MIBs (Cisco, MikroTik) plus a fixture-based fake agent — solid, but not the same as a real switch response. Do this the first time Phase 1/2 work has a reachable core switch in front of it; not worth blocking on.
 - **gofmt drift in three pre-existing legacy files** (`backup/diff.go`, `logger/logger.go`, `report/json.go`) — untouched by design during Phase 0 to keep diffs scoped. Clean up in one small, isolated commit once the daemon phases have settled, not mixed into feature work.
+- **Digest-pin the Dockerfile's base images** (`golang:1.25.7-alpine`, `alpine:3.21` are currently tag-pinned, not digest-pinned) — worth doing once the project is past active early development, for supply-chain hardening. Not urgent.
 
 ---
 
