@@ -9,10 +9,14 @@ import (
 )
 
 var tuiCmd = &cobra.Command{
-	Use:   "tui",
-	Short: "Interactive terminal UI",
-	Long: `Launch the interactive terminal user interface for Bidar.
-Browse devices, scan for err-disabled ports, fix port-security violations.`,
+	Use:   "tui-config",
+	Short: "Manage device config interactively (config-file TUI)",
+	Long: `Manage config.yaml/devices.csv and run live SSH checks against devices.
+
+This is the config-file-based terminal UI (device CRUD against the YAML/CSV
+config, live SSH checks). It reads and writes config.yaml and holds SSH
+credentials in-process. The name was changed from "tui" to "tui-config" in
+Phase 0 to free up the "tui" name for the Phase 5 REST-API-client TUI.`,
 	Run: runTUICmd,
 }
 
