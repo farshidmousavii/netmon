@@ -12,7 +12,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -20,9 +19,9 @@ import (
 	"github.com/go-ldap/ldap/v3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/farshidmousavii/bidar/internal/store"
+	"github.com/farshidmousavii/bidar/internal/testdb"
 )
 
 // fakeClient implements the ad.client interface against recorded entries.
@@ -118,28 +117,10 @@ type testHarness struct {
 
 func newTestHarness(t *testing.T, entries []*ldap.Entry, dialErr error) *testHarness {
 	t.Helper()
-	url := os.Getenv(envconfig.TestDatabaseURL)
-	if url == "" {
-		t.Skip(envconfig.TestDatabaseURL + " not set; skipping AD provider integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := db.Migrate(ctx, url); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	pool, err := db.Open(ctx, url)
-	if err != nil {
-		t.Fatalf("open pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	// Wipe in FK order.
-	if _, err := pool.Exec(ctx, `DELETE FROM host_observations`); err != nil {
-		t.Fatalf("wipe observations: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM hosts`); err != nil {
-		t.Fatalf("wipe hosts: %v", err)
-	}
+	// Each test gets its own scratch database so concurrent package
+	// binaries never wipe each other's tables.
+	url := testdb.ScratchURL(t, testdb.BaseURL(t))
+	pool := testdb.Open(t, url)
 
 	dial, fake := fakeDial(entries, dialErr)
 	p, err := newWithDialer(Config{

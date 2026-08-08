@@ -3,13 +3,17 @@ package store
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/netip"
+	"time"
 
 	"github.com/farshidmousavii/bidar/internal/domain"
 )
 
 const hostColumns = `id, hostname, fqdn, ad_domain, ad_ou,
 	ad_object_guid::text, ad_object_sid, ad_last_logon_at,
-	ad_status, match_status, current_ip, current_mac, last_ad_sync_at`
+	ad_status, match_status, current_ip, current_mac,
+	current_vlan, vlan_source, last_ad_sync_at, last_presence_at`
 
 // FindHostByGUID returns the host already linked to an AD objectGUID, or
 // ErrNotFound. Matching rule 1 (architecture.md §Phase 1): GUID match
@@ -36,21 +40,64 @@ func (s *Store) FindHostByHostname(ctx context.Context, hostname string) (*domai
 // InsertHost creates a new host row and returns its id. Used when neither
 // the GUID nor the hostname matches an existing host (rule 3: a fresh AD
 // identity with no conflicting evidence — no needs_review flag needed).
+// Presence fields (current_ip, current_mac, last_presence_at) are set by
+// network-presence providers (ARP/DHCP/ICMP); AD leaves them NULL.
 func (s *Store) InsertHost(ctx context.Context, h *domain.Host) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO hosts (hostname, fqdn, ad_domain, ad_ou,
 			ad_object_guid, ad_object_sid, ad_last_logon_at,
-			ad_status, match_status, last_ad_sync_at)
-		VALUES ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10)
+			ad_status, match_status, current_ip, current_mac,
+			current_vlan, vlan_source, last_ad_sync_at, last_presence_at)
+		VALUES ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id`,
 		h.Hostname, h.FQDN, h.ADDomain, h.ADOU,
 		h.ADObjectGUID, h.ADObjectSID, h.ADLastLogonAt,
-		h.ADStatus, h.MatchStatus, h.LastADSyncAt).Scan(&id)
+		h.ADStatus, h.MatchStatus, h.CurrentIP, h.CurrentMAC,
+		h.CurrentVLAN, h.VLANSrc, h.LastADSyncAt, h.LastPresenceAt).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert host: %w", err)
 	}
 	return id, nil
+}
+
+// FindHostByIP returns the host currently holding ip, or ErrNotFound.
+func (s *Store) FindHostByIP(ctx context.Context, ip netip.Addr) (*domain.Host, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT `+hostColumns+`
+		FROM hosts
+		WHERE current_ip = $1::inet`, ip)
+	return scanHost(row.Scan)
+}
+
+// FindHostByMAC returns the host currently holding mac, or ErrNotFound.
+func (s *Store) FindHostByMAC(ctx context.Context, mac net.HardwareAddr) (*domain.Host, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT `+hostColumns+`
+		FROM hosts
+		WHERE current_mac = $1::macaddr`, mac)
+	return scanHost(row.Scan)
+}
+
+// UpdateHostFromPresence refreshes the network-presence fields of an
+// existing host from an ARP/DHCP/ICMP observation. current_vlan +
+// vlan_source='arp_svi' is the Phase 1 inferred VLAN (overwritten by
+// switch_verified in Phase 3). AD fields and match_status are untouched.
+func (s *Store) UpdateHostFromPresence(ctx context.Context, id int64, ip *netip.Addr, mac *net.HardwareAddr, vlan *int32, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE hosts SET
+			current_ip = COALESCE($2::inet, current_ip),
+			current_mac = COALESCE($3::macaddr, current_mac),
+			current_vlan = COALESCE($4, current_vlan),
+			vlan_source = CASE WHEN $4 IS NOT NULL THEN 'arp_svi' ELSE vlan_source END,
+			last_presence_at = $5,
+			updated_at = now()
+		WHERE id = $1`,
+		id, ip, mac, vlan, now)
+	if err != nil {
+		return fmt.Errorf("update host %d from presence: %w", id, err)
+	}
+	return nil
 }
 
 // UpdateHostFromAD refreshes the AD-sourced fields of an existing host.
@@ -81,7 +128,7 @@ func scanHost(scan func(dest ...any) error) (*domain.Host, error) {
 		&h.ID, &h.Hostname, &h.FQDN, &h.ADDomain, &h.ADOU,
 		&h.ADObjectGUID, &h.ADObjectSID, &h.ADLastLogonAt,
 		&h.ADStatus, &h.MatchStatus, &h.CurrentIP, &h.CurrentMAC,
-		&h.LastADSyncAt,
+		&h.CurrentVLAN, &h.VLANSrc, &h.LastADSyncAt, &h.LastPresenceAt,
 	)
 	if err != nil {
 		return nil, notFound(err)

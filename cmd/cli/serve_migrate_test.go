@@ -5,8 +5,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -15,25 +13,24 @@ import (
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/envconfig"
+	"github.com/farshidmousavii/bidar/internal/testdb"
 )
 
 // serveTestEnv sets the daemon env vars against the shared test database
 // (migrated, idempotently) and returns the URL.
 func serveTestEnv(t *testing.T) string {
 	t.Helper()
-	base := os.Getenv(envconfig.TestDatabaseURL)
-	if base == "" {
-		t.Skip(envconfig.TestDatabaseURL + " not set; skipping serve/migrate integration test")
-	}
+	// Own scratch database per test (see testdb package doc).
+	scratch := testdb.ScratchURL(t, testdb.BaseURL(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := db.Migrate(ctx, base); err != nil {
+	if err := db.Migrate(ctx, scratch); err != nil {
 		t.Fatalf("migrate test db: %v", err)
 	}
-	t.Setenv(db.DatabaseURLEnv, base)
+	t.Setenv(db.DatabaseURLEnv, scratch)
 	t.Setenv(crypto.MasterKeyEnv, testMasterKey)
 	t.Setenv(daemonLogLevelEnv, "debug")
-	return base
+	return scratch
 }
 
 // The daemon log level env var, via the single source of truth. (Renamed
@@ -42,44 +39,10 @@ func serveTestEnv(t *testing.T) string {
 const daemonLogLevelEnv = envconfig.LogLevel
 
 // serveScratchDB creates an UN-migrated database for the schema-missing
-// test and registers cleanup.
+// test (testdb.ScratchURL does not apply migrations).
 func serveScratchDB(t *testing.T, baseURL string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	name := fmt.Sprintf("bidar_serve_test_%d", time.Now().UnixNano())
-
-	pool, err := db.Open(ctx, baseURL)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	if _, err := pool.Exec(ctx, "CREATE DATABASE \""+name+"\""); err != nil {
-		pool.Close()
-		t.Fatalf("create scratch db %s: %v", name, err)
-	}
-	pool.Close()
-
-	t.Cleanup(func() {
-		cctx, ccancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer ccancel()
-		p, err := db.Open(cctx, baseURL)
-		if err != nil {
-			t.Errorf("reconnect for cleanup: %v", err)
-			return
-		}
-		defer p.Close()
-		if _, err := p.Exec(cctx, "DROP DATABASE \""+name+"\" WITH (FORCE)"); err != nil {
-			t.Errorf("drop scratch db: %v", err)
-		}
-	})
-
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	u.Path = "/" + name
-	return u.String()
+	return testdb.ScratchURL(t, baseURL)
 }
 
 func TestMigrateSchema(t *testing.T) {

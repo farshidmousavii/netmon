@@ -25,6 +25,7 @@ import (
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/envconfig"
+	"github.com/farshidmousavii/bidar/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,10 +35,9 @@ var testMasterKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xAB},
 
 func importTestEnv(t *testing.T) (string, string) {
 	t.Helper()
-	url := os.Getenv(envconfig.TestDatabaseURL)
-	if url == "" {
-		t.Skip("BIDAR_TEST_DATABASE_URL not set; skipping import-devices integration test")
-	}
+	// Own scratch database per test: concurrent package binaries (ad/arp
+	// providers, internal/db) must never share a database.
+	url := testdb.ScratchURL(t, testdb.BaseURL(t))
 	t.Setenv(db.DatabaseURLEnv, url)
 	t.Setenv(crypto.MasterKeyEnv, testMasterKey)
 	return url, testMasterKey
