@@ -209,3 +209,42 @@ func TestMigrateIntegration(t *testing.T) {
 		t.Errorf("after down, expected only schema_migrations, got %v", remaining)
 	}
 }
+
+// TestEnsureSchemaUpToDate: the daemon's startup check — fails clearly on
+// an un-migrated schema, passes with the current version, and never
+// applies migrations itself.
+func TestEnsureSchemaUpToDate(t *testing.T) {
+	scratch := scratchDB(t, testDatabaseURL(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	pool, err := Open(ctx, scratch)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer pool.Close()
+
+	// Un-migrated schema: must fail with guidance, and must NOT have
+	// applied anything (SchemaVersion still reports not migrated).
+	if _, err := EnsureSchemaUpToDate(ctx, pool); err == nil {
+		t.Fatal("expected error for un-migrated schema")
+	} else if !strings.Contains(err.Error(), "bidar migrate") {
+		t.Errorf("error should point at bidar migrate, got: %v", err)
+	}
+
+	// After a real migrate, the check passes and reports the version.
+	if err := Migrate(ctx, scratch); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	version, err := EnsureSchemaUpToDate(ctx, pool)
+	if err != nil {
+		t.Fatalf("EnsureSchemaUpToDate after migrate: %v", err)
+	}
+	want, err := latestSchemaVersion()
+	if err != nil {
+		t.Fatalf("latestSchemaVersion: %v", err)
+	}
+	if version != want {
+		t.Errorf("version = %d, want %d (latest embedded migration)", version, want)
+	}
+}

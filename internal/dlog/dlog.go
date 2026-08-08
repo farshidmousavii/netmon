@@ -45,12 +45,19 @@ func New(opts Options) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{Level: level}))
 }
 
+// LevelFromEnv resolves the BIDAR_LOG_LEVEL value (default info) without
+// constructing a logger — handy for callers that want to log the resolved
+// level as a structured field.
+func LevelFromEnv() (slog.Level, error) {
+	return parseLevel(os.Getenv(LevelEnv))
+}
+
 // NewFromEnv builds the daemon logger from the environment: level from
 // BIDAR_LOG_LEVEL (default info), output to stdout. An unknown level
 // string fails loudly rather than silently logging nothing — a typo in a
 // systemd Environment= line should be visible at startup, not months later.
 func NewFromEnv() (*slog.Logger, error) {
-	level, err := parseLevel(os.Getenv(LevelEnv))
+	level, err := LevelFromEnv()
 	if err != nil {
 		return nil, err
 	}

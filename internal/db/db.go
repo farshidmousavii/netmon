@@ -14,13 +14,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"time"
-
 	"github.com/golang-migrate/migrate/v4"
 	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"os"
+	"time"
 
 	// Registers the "pgx/v5" database/sql driver used by the migration
 	// runner below.
@@ -68,6 +69,84 @@ func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+// ErrSchemaNotMigrated is returned by SchemaVersion when the database has
+// no schema_migrations table (golang-migrate has never run against it).
+var ErrSchemaNotMigrated = errors.New("database schema not initialized (run bidar migrate)")
+
+// SchemaVersion reports the applied migration version and dirty flag from
+// the database's schema_migrations bookkeeping. It returns
+// ErrSchemaNotMigrated (wrapped) when the table does not exist.
+func SchemaVersion(ctx context.Context, pool *pgxpool.Pool) (version uint, dirty bool, err error) {
+	err = pool.QueryRow(ctx, `SELECT version, dirty FROM schema_migrations`).Scan(&version, &dirty)
+	// A missing table surfaces as pgx.ErrNoRows on some paths and as
+	// SQLSTATE 42P01 (undefined table) on others — both mean "golang-
+	// migrate has never run here".
+	if errors.Is(err, pgx.ErrNoRows) || isUndefinedTable(err) {
+		return 0, false, fmt.Errorf("%w", ErrSchemaNotMigrated)
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read schema version: %w", err)
+	}
+	return version, dirty, nil
+}
+
+func isUndefinedTable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+}
+
+// latestSchemaVersion is the highest migration version embedded in the
+// binary — the version a migrated database is expected to be at.
+func latestSchemaVersion() (uint, error) {
+	src, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		return 0, fmt.Errorf("load embedded migrations: %w", err)
+	}
+	defer src.Close()
+
+	version, err := src.First()
+	if err != nil {
+		return 0, fmt.Errorf("no embedded migrations found: %w", err)
+	}
+	for {
+		next, err := src.Next(version)
+		if errors.Is(err, os.ErrNotExist) {
+			return version, nil
+		}
+		if err != nil {
+			return 0, fmt.Errorf("walk embedded migrations: %w", err)
+		}
+		version = next
+	}
+}
+
+// EnsureSchemaUpToDate verifies the database schema is at the version of
+// the newest embedded migration. It never applies migrations — that is
+// `bidar migrate`'s job — so a daemon started against an un-migrated,
+// dirty, or stale schema fails loudly instead of silently running
+// migrations as a side effect. On success it returns the current version.
+func EnsureSchemaUpToDate(ctx context.Context, pool *pgxpool.Pool) (uint, error) {
+	want, err := latestSchemaVersion()
+	if err != nil {
+		return 0, err
+	}
+
+	got, dirty, err := SchemaVersion(ctx, pool)
+	if errors.Is(err, ErrSchemaNotMigrated) {
+		return 0, fmt.Errorf("%w (expected version %d)", err, want)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if dirty {
+		return 0, fmt.Errorf("database schema is dirty at version %d: run bidar migrate (fix the failed migration first)", got)
+	}
+	if got != want {
+		return 0, fmt.Errorf("database schema at version %d, expected %d: run bidar migrate", got, want)
+	}
+	return got, nil
 }
 
 // Migrate applies all pending migrations (golang-migrate, embedded in the

@@ -129,3 +129,14 @@ func TestNewFromEnv(t *testing.T) {
 		}
 	})
 }
+
+func TestLevelFromEnv(t *testing.T) {
+	t.Setenv(LevelEnv, "warn")
+	level, err := LevelFromEnv()
+	if err != nil {
+		t.Fatalf("LevelFromEnv: %v", err)
+	}
+	if level != slog.LevelWarn {
+		t.Errorf("level = %v, want WARN", level)
+	}
+}
