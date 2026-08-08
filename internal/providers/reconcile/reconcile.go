@@ -82,6 +82,34 @@ func Host(ctx context.Context, st *store.Store, hostname *string, ip *netip.Addr
 	return id, nil
 }
 
+// Existing matches a liveness-only observation (an IP with no other
+// identity) to an existing host, or returns nil without creating
+// anything. Used by icmpsweep: a bare IP answering ping is not enough
+// evidence to fabricate a host row — host identity comes from AD/ARP/DHCP.
+func Existing(ctx context.Context, st *store.Store, ip *netip.Addr) (*domain.Host, error) {
+	if ip == nil {
+		return nil, nil
+	}
+	host, err := st.FindHostByIP(ctx, *ip)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("find host by ip: %w", err)
+	}
+	return host, nil
+}
+
+// UnlinkedObservation appends a host_observations row with host_id NULL —
+// liveness evidence for an IP no host row exists for yet. Later ARP/DHCP
+// evidence creates the host; future ICMP runs then link to it by IP.
+func UnlinkedObservation(ctx context.Context, st *store.Store, source string, ip *netip.Addr, detail []byte, now time.Time) error {
+	obs := &domain.Observation{
+		Source:     source,
+		IP:         ip,
+		Detail:     detail,
+		ObservedAt: now,
+	}
+	return st.InsertObservation(ctx, obs)
+}
+
 // Observation appends one host_observations row linked to the host
 // reconcile.Host returned. source is the provider name (arp | dhcp |
 // icmp); detail is provider-specific JSON.

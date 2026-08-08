@@ -78,3 +78,11 @@ type DHCPSource struct {
 	ConnectionConfig []byte // jsonb
 	CredentialEnc    []byte
 }
+
+// Subnet is one row of subnets — a configured range the ICMP sweep scans.
+type Subnet struct {
+	ID         int64
+	CIDR       netip.Prefix
+	Label      *string
+	VLANNumber *int32
+}
