@@ -78,7 +78,10 @@ func ScratchURL(t *testing.T, baseURL string) string {
 }
 
 // Open applies migrations (idempotent) and opens a pool to url; the pool
-// is closed on cleanup.
+// is closed on cleanup. The pool is capped at 2 connections: test
+// binaries run in parallel and several pools are alive at once against
+// one Postgres server, whose default max_connections (100) would
+// otherwise be exhausted under full-suite load.
 func Open(t *testing.T, url string) *pgxpool.Pool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -86,7 +89,7 @@ func Open(t *testing.T, url string) *pgxpool.Pool {
 	if err := db.Migrate(ctx, url); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
-	pool, err := db.Open(ctx, url)
+	pool, err := db.Open(ctx, url+"?pool_max_conns=2")
 	if err != nil {
 		t.Fatalf("open pool: %v", err)
 	}

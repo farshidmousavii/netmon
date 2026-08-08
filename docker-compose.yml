@@ -53,6 +53,15 @@ services:
       BIDAR_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       BIDAR_MASTER_KEY: ${BIDAR_MASTER_KEY}
       BIDAR_LOG_LEVEL: ${BIDAR_LOG_LEVEL:-info}
+      BIDAR_AD_INTERVAL: ${BIDAR_AD_INTERVAL:-24h}
+      BIDAR_ARP_INTERVAL: ${BIDAR_ARP_INTERVAL:-5m}
+      BIDAR_DHCP_INTERVAL: ${BIDAR_DHCP_INTERVAL:-5m}
+      BIDAR_ICMP_INTERVAL: ${BIDAR_ICMP_INTERVAL:-5m}
+      BIDAR_DHCP_STALENESS: ${BIDAR_DHCP_STALENESS:-24h}
+    # icmpsweep execs the system ping binary (raw ICMP socket): the
+    # container runs nonroot (Phase 0 Dockerfile), so it needs NET_RAW.
+    cap_add:
+      - NET_RAW
     depends_on:
       postgres:
         condition: service_healthy

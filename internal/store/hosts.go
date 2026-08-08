@@ -103,6 +103,32 @@ func (s *Store) UpdateHostFromPresence(ctx context.Context, id int64, hostname *
 	return nil
 }
 
+// ListHosts returns every host row, most recently seen first — the view
+// `bidar hosts` prints.
+func (s *Store) ListHosts(ctx context.Context) ([]domain.Host, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+hostColumns+`
+		FROM hosts
+		ORDER BY coalesce(last_seen_at, last_presence_at, first_seen_at) DESC NULLS LAST, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []domain.Host
+	for rows.Next() {
+		h, err := scanHost(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, *h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate hosts: %w", err)
+	}
+	return hosts, nil
+}
+
 // UpdateHostFromAD refreshes the AD-sourced fields of an existing host.
 // MatchStatus is deliberately NOT touched — an operator's needs_review
 // flag must survive re-syncs.

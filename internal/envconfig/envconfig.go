@@ -41,6 +41,22 @@ const (
 	// 24h). Stale data is a failed source, never silently fresh data.
 	DHCPStaleness = "BIDAR_DHCP_STALENESS"
 
+	// ADInterval is how often the AD provider syncs (Go duration,
+	// default 24h).
+	ADInterval = "BIDAR_AD_INTERVAL"
+
+	// ARPInterval is how often the ARP collector polls core devices
+	// (Go duration, default 5m).
+	ARPInterval = "BIDAR_ARP_INTERVAL"
+
+	// DHCPInterval is how often the DHCP collector polls its sources
+	// (Go duration, default 5m).
+	DHCPInterval = "BIDAR_DHCP_INTERVAL"
+
+	// ICMPInterval is how often the ICMP sweep runs (Go duration,
+	// default 5m).
+	ICMPInterval = "BIDAR_ICMP_INTERVAL"
+
 	// TestDatabaseURL points integration tests at a scratch Postgres
 	// (test-only; not a runtime configuration variable).
 	TestDatabaseURL = "BIDAR_TEST_DATABASE_URL"
