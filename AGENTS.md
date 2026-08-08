@@ -77,6 +77,7 @@ Full rationale: `docs/architecture.md`. Schema per phase: `docs/database-schema.
 - **Every provider is isolated.** Its own config, its own failure handling. One provider failing must never crash the daemon or block the others.
 - **All discovery/poll jobs must be resumable from the database**, not from in-memory state — the process can restart at any time.
 - **No credentials in plaintext in the database.** SNMP communities/v3 keys, AD service-account password, MikroTik API password — encrypted at the application layer before insert, never logged, never returned in API responses.
+- **No real infrastructure data in git, ever — not even in docs.** Real IPs, hostnames, subnet ranges, device names, DHCP server addresses, VLAN-to-subnet mappings for an actual deployment belong in the database (`network_devices`, `subnets`, `dhcp_sources`) only. `docs/architecture.md`'s "Decisions made" section records the *shape* of a decision ("3 Cisco cores, one per building" / "11 subnets" / "3 DHCP sources") — never the addresses themselves. If a task's output would put a real IP, hostname, or subnet CIDR into a file under `docs/`, `README.md`, a commit message, or any other tracked file, stop and write it to the database instead. This already happened once (real subnet data committed to `docs/`, caught and scrubbed from git history) — treat that as the standard this rule exists to prevent from recurring.
 - **Idempotency:** any ingestion path or provider run must be safe to run twice with the same input.
 
 ## 6. External dependencies — ask before adding
