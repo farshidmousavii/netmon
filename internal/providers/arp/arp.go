@@ -13,7 +13,6 @@ package arp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -25,6 +24,7 @@ import (
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/domain"
 	"github.com/farshidmousavii/bidar/internal/providers"
+	"github.com/farshidmousavii/bidar/internal/providers/reconcile"
 	"github.com/farshidmousavii/bidar/internal/snmp"
 	"github.com/farshidmousavii/bidar/internal/store"
 )
@@ -238,46 +238,13 @@ func (p *Provider) walkMediaTable(ctx context.Context, cfg snmp.Config) ([]snmp.
 	return out, nil
 }
 
-// reconcile applies the matching rules for one ARP entry: IP match, then
-// MAC match, then insert — and appends one observation (host_observations
-// is the history log; hosts holds current state, so re-runs append
-// observations but never duplicate hosts).
+// reconcile applies the shared Phase 1 matching rules for one ARP entry
+// (IP -> MAC -> insert) and appends one observation. host_observations is
+// the history log; hosts holds current state — re-runs append observations
+// but never duplicate hosts.
 func (p *Provider) reconcile(ctx context.Context, dev domain.Device, ip netip.Addr, ifIndex int, mac net.HardwareAddr, svi sviInfo, now time.Time) error {
 	ipCopy := ip
 	macCopy := mac
-
-	host, err := p.store.FindHostByIP(ctx, ip)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("find host by ip: %w", err)
-	}
-	if host == nil {
-		host, err = p.store.FindHostByMAC(ctx, mac)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("find host by mac: %w", err)
-		}
-	}
-
-	var hostID int64
-	if host != nil {
-		hostID = host.ID
-		if err := p.store.UpdateHostFromPresence(ctx, hostID, &ipCopy, &macCopy, svi.vlan, now); err != nil {
-			return err
-		}
-	} else {
-		newHost := &domain.Host{
-			CurrentIP:      &ipCopy,
-			CurrentMAC:     &macCopy,
-			CurrentVLAN:    svi.vlan,
-			VLANSrc:        vlanSource(svi.vlan),
-			ADStatus:       "unknown",
-			MatchStatus:    "matched",
-			LastPresenceAt: &now,
-		}
-		hostID, err = p.store.InsertHost(ctx, newHost)
-		if err != nil {
-			return err
-		}
-	}
 
 	detail, err := json.Marshal(map[string]any{
 		"device_id": dev.ID,
@@ -289,16 +256,11 @@ func (p *Provider) reconcile(ctx context.Context, dev domain.Device, ip netip.Ad
 		return fmt.Errorf("marshal arp detail: %w", err)
 	}
 
-	obs := &domain.Observation{
-		HostID:     &hostID,
-		Source:     "arp",
-		IP:         &ipCopy,
-		MAC:        &macCopy,
-		VLANNumber: svi.vlan,
-		Detail:     detail,
-		ObservedAt: now,
+	hostID, err := reconcile.Host(ctx, p.store, nil, &ipCopy, &macCopy, svi.vlan, vlanSource(svi.vlan), now)
+	if err != nil {
+		return err
 	}
-	return p.store.InsertObservation(ctx, obs)
+	return reconcile.Observation(ctx, p.store, hostID, "arp", nil, &ipCopy, &macCopy, svi.vlan, detail, now)
 }
 
 func vlanSource(vlan *int32) *string {

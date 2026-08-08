@@ -65,3 +65,16 @@ type SNMPProfile struct {
 	TimeoutMS          int
 	Retries            int
 }
+
+// DHCPSource is one row of dhcp_sources — a lease evidence source, by
+// type (windows | mikrotik | isc | other). ConnectionConfig is
+// type-specific JSON (windows: {"path": ...}; mikrotik: {"host": ...,
+// "username": ...}); CredentialEnc is the encrypted secret if the type
+// needs one (none for the windows file-export method).
+type DHCPSource struct {
+	ID               int64
+	Name             string
+	SourceType       string
+	ConnectionConfig []byte // jsonb
+	CredentialEnc    []byte
+}

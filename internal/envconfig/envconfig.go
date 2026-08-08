@@ -36,6 +36,11 @@ const (
 	// "DC=corp,DC=local".
 	ADBaseDN = "BIDAR_AD_BASE_DN"
 
+	// DHCPStaleness is how old a Windows DHCP lease-export file may be
+	// before the collector refuses it (Go duration, e.g. "24h"; default
+	// 24h). Stale data is a failed source, never silently fresh data.
+	DHCPStaleness = "BIDAR_DHCP_STALENESS"
+
 	// TestDatabaseURL points integration tests at a scratch Postgres
 	// (test-only; not a runtime configuration variable).
 	TestDatabaseURL = "BIDAR_TEST_DATABASE_URL"

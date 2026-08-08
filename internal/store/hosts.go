@@ -80,20 +80,23 @@ func (s *Store) FindHostByMAC(ctx context.Context, mac net.HardwareAddr) (*domai
 }
 
 // UpdateHostFromPresence refreshes the network-presence fields of an
-// existing host from an ARP/DHCP/ICMP observation. current_vlan +
-// vlan_source='arp_svi' is the Phase 1 inferred VLAN (overwritten by
-// switch_verified in Phase 3). AD fields and match_status are untouched.
-func (s *Store) UpdateHostFromPresence(ctx context.Context, id int64, ip *netip.Addr, mac *net.HardwareAddr, vlan *int32, now time.Time) error {
+// existing host from an ARP/DHCP observation. hostname only fills a NULL
+// hostname (an AD-assigned name is never overwritten). vlanSource is the
+// label to set when vlan is present (ARP passes "arp_svi"; DHCP passes
+// nil so an existing label survives). AD fields and match_status are
+// untouched.
+func (s *Store) UpdateHostFromPresence(ctx context.Context, id int64, hostname *string, ip *netip.Addr, mac *net.HardwareAddr, vlan *int32, vlanSource *string, now time.Time) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE hosts SET
-			current_ip = COALESCE($2::inet, current_ip),
-			current_mac = COALESCE($3::macaddr, current_mac),
-			current_vlan = COALESCE($4, current_vlan),
-			vlan_source = CASE WHEN $4 IS NOT NULL THEN 'arp_svi' ELSE vlan_source END,
-			last_presence_at = $5,
+			hostname = COALESCE(hosts.hostname, $2),
+			current_ip = COALESCE($3::inet, current_ip),
+			current_mac = COALESCE($4::macaddr, current_mac),
+			current_vlan = COALESCE($5, current_vlan),
+			vlan_source = CASE WHEN $5 IS NOT NULL THEN COALESCE($6, vlan_source) ELSE vlan_source END,
+			last_presence_at = $7,
 			updated_at = now()
 		WHERE id = $1`,
-		id, ip, mac, vlan, now)
+		id, hostname, ip, mac, vlan, vlanSource, now)
 	if err != nil {
 		return fmt.Errorf("update host %d from presence: %w", id, err)
 	}
