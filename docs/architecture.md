@@ -19,13 +19,27 @@ Bidar already exists as a CLI tool (formerly netmon): `monitor` (ping + SNMP hea
 - One `bidar` binary, one CLI (cobra — already in use). Existing subcommands are unchanged in behavior, with one rename: the existing `tui` becomes **`bidar tui-config`** (it manages `config.yaml` and holds SSH credentials in-process — that's a different tool than the Phase 5 TUI). New subcommands are added: `bidar serve` (runs the daemon — Phases 1–7), `bidar migrate` (DB migrations), `bidar import-devices` (one-time import of an existing `config.yaml`/`devices.csv` into `network_devices`/`snmp_profiles`/`ssh_credentials`).
 - `internal/snmp` (already exists — `SnmpWalk`, single SNMPv2c GET, string-typed, no walk/v3/context support today) stays untouched for CLI compatibility. Phase 1's ARP collector and Phase 2's SNMP provider add new functions to the same package (table walk, v3 auth, context, typed varbinds) — additive only, never a rewrite of `SnmpWalk`. The audit also found an off-by-one bug in `ParseVendorSNMP` (reads the enterprise-ID octet at the wrong index) — fix it as an isolated, tested commit in Phase 0, separate from the new functions.
 - `network_devices` (new, Postgres) becomes the canonical device list. The existing YAML/CSV config format remains a supported input via `bidar import-devices` (strictly one-directional, file → DB — it never rewrites `config.yaml`) and stays available as-is for `monitor`/`backup`/`exec`/`tui-config`.
-- Credential encryption for DB-stored secrets is handled by a new `internal/crypto` package, keyed by the `BIDAR_MASTER_KEY` environment variable. This does **not** extend to the legacy YAML/CSV credential files — those remain plaintext-on-disk, operator-owned and gitignored, exactly as today.
+- Credential encryption for DB-stored secrets is handled by a new `internal/crypto` package, keyed by the `BIDAR_MASTER_KEY` environment variable. This does **not** extend to the legacy YAML/CSV credential files — those remain plaintext-on-disk, operator-owned and gitignored, exactly as today. `bidar serve` validates `BIDAR_MASTER_KEY` at startup (fails fast, before anything else) even before any Phase 1+ provider actually needs it — the daemon's whole contract depends on encryption being possible, so a missing key should be an immediate, unambiguous startup failure, not a mid-operation one later.
 - The daemon gets its own `log/slog`-based logger, injected via constructor. The existing `internal/logger` (custom, color-based, package-level global) is left untouched — do not route daemon logging through it, and do not refactor it to slog as part of this merge.
 
 **What stays separate — this is the important part:**
 - `exec`, `backup`, and `tui-config` are **read-write**: they SSH into devices and can change configuration. The daemon (Phases 1–7) is **read-only by design** — SNMP reads, ARP reads, DHCP lease reads, LDAP reads, agent reports. It never sends a device a command that changes anything.
 - Credentials follow the same split: `snmp_profiles` (read-only community/v3 keys) is separate from `ssh_credentials` (read-write, used only by `exec`/`backup`/`tui-config`). The daemon never touches `ssh_credentials`, and daemon code (`internal/providers/*`) must never import `internal/device` (the existing SSH/exec package) — verified one-directional today (`internal/device` imports `internal/snmp`; the reverse is not true, and must stay that way).
 - This isn't just tidiness: it bounds the blast radius of a bug. A mistake in a passive, unattended, always-on poller should never be able to reach a code path that can push configuration to production switches.
+
+---
+
+## Production deployment (Docker Compose)
+
+Local development so far has used a developer-run Postgres container (Docker) alongside a locally-built `bidar` binary — fine for building/testing individual packages, but production needs the whole stack (Postgres + `bidar serve`, with migrations applied first) to come up together, reproducibly, on a clean host.
+
+- **`Dockerfile`**: multi-stage build. A Go build stage (pinned to the `go.mod` Go version) produces the `bidar` binary; the final stage is a small runtime image (alpine or distroless) containing just that binary. The same image runs either `bidar serve` or `bidar migrate` — which one is decided by the command passed in compose, not by two different images.
+- **`docker-compose.yml`**: three services —
+  1. `postgres` — official image, a named volume for the data directory (production data must survive container recreation), a healthcheck (`pg_isready`).
+  2. `migrate` — the `bidar` image running `bidar migrate`, `depends_on: postgres: condition: service_healthy`, runs once and exits.
+  3. `bidar` (the daemon, `bidar serve`) — `depends_on: migrate: condition: service_completed_successfully` and `postgres: condition: service_healthy`, so it never starts against a database that isn't ready or migrated.
+- **`.env.example`**: every `BIDAR_*` var compose needs, with safe placeholder values — `BIDAR_MASTER_KEY` must be a real generated secret in production (e.g. `openssl rand -base64 32`), never the placeholder.
+- **Env var names, centralized**: every `BIDAR_*` name is defined exactly once, in `internal/envconfig`, as an exported string constant. `internal/db`, `internal/crypto`, and `internal/dlog` reference those constants in their own `*FromEnv()` constructors rather than each hardcoding its own copy of the string — this is the single source of truth both the Go code and `.env.example` are checked against, so the two can't silently drift apart.
 
 ---
 

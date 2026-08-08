@@ -24,7 +24,7 @@ Tasks:
    - Each config `credentials` entry (or each CSV row's per-device username/password) → one `ssh_credentials` row, linked via `ssh_credential_id`. Encrypt via `internal/crypto` on the way in.
    - Strictly one-directional: file → DB. Never writes back to `config.yaml`/`devices.csv` — that stays `tui-config`'s job.
    - After import, print a summary listing every device still at `role = unassigned`, so the operator knows what needs manual role assignment before the Phase 1 ARP collector will use it.
-6. **Daemon logging**: add a `log/slog`-based logger for the daemon (`bidar serve` and everything under `internal/providers`/`internal/api`), injected via constructor per `coding-standards.md`. Do not touch or route through the existing `internal/logger`. Env var: `BIDAR_LOG_LEVEL` (`debug|info|warn|error`, default `info`) — pinned here per AGENTS.md §6.
+6. **Daemon logging**: add a `log/slog`-based logger for the daemon (`bidar serve` and everything under `internal/providers`/`internal/api`), injected via constructor per `coding-standards.md`. Do not touch or route through the existing `internal/logger`.
 7. **`bidar serve`, `bidar migrate`** (new subcommands): added to `cmd/cli/` following the existing `var fooCmd = &cobra.Command{...}` + `init(){ rootCmd.AddCommand(...) }` pattern. `serve` and `migrate` are env-configured (`BIDAR_*` vars), not via the root `--config` flag the legacy commands use — keep that split explicit in the command help text.
 
 DoD:
@@ -34,15 +34,44 @@ DoD:
 - `bidar migrate` applies `0001_init` cleanly against a fresh database.
 - Zero imports of `internal/device` from any daemon-side package.
 
+**Status: complete.** All five DoD bullets met (the live-capture verification of `ParseVendorSNMP` is source/fixture-verified but not yet checked against a real device — tracked in §Backlog below, not blocking). `internal/db`, `internal/crypto`, `internal/dlog`, migrations `0001`+`0002`, `bidar import-devices`, `bidar migrate`, and a `bidar serve` stub all exist and are tested.
+
+### Phase 0 addendum — centralize env var names, Dockerize for production
+
+Added after initial Phase 0 completion, once local testing surfaced two production-readiness gaps: every `BIDAR_*` env var name was defined separately inside the package that reads it (no single source of truth), and there was no way to bring up the full stack (Postgres + migrations + the daemon) reproducibly on a clean host.
+
+Tasks:
+1. **`internal/envconfig`** (new): every `BIDAR_*` name (`DatabaseURL`, `MasterKey`, `LogLevel`, and any added later) as an exported string constant, in one file. Update `internal/db.DatabaseURLFromEnv`, `internal/crypto.NewFromEnv`, `internal/dlog.NewFromEnv`/`LevelFromEnv` to reference these constants instead of each defining its own local copy of the string. Keep each package's own `*FromEnv()` constructor and isolated tests exactly as they are — only the name *strings* move, not the env-reading logic.
+2. While touching `internal/dlog`: rename the `dlogLevelEnvForTest` constant — despite the name it's the real production env var name, not test-only; the name is misleading and should be fixed as part of this same change.
+3. **`.env.example`** at repo root: every var `internal/envconfig` defines, with safe placeholder values (never a real secret). Add a short comment above `BIDAR_MASTER_KEY` making clear the placeholder must be replaced with a real generated key in production.
+4. **`Dockerfile`**: multi-stage build (pinned Go version from `go.mod`) producing a small final image with just the `bidar` binary. Same image serves both `bidar serve` and `bidar migrate` — the command decides, not two images.
+5. **`docker-compose.yml`**: `postgres` (named volume, `pg_isready` healthcheck) → `migrate` (one-shot `bidar migrate`, waits for postgres healthy) → `bidar` (the daemon, waits for `migrate` to complete successfully **and** postgres healthy). No manual ordering steps for the operator.
+6. Document the production Docker setup (vs. the developer's local Postgres-in-Docker + locally-built-binary workflow used through Phase 0) in `docs/architecture.md` §Production deployment — already added.
+
+DoD:
+- `docker compose up` on a clean host (no prior state) brings up Postgres, applies migrations, and starts `bidar serve` with zero manual steps beyond supplying a real `.env`.
+- Every `BIDAR_*` env var name exists in exactly one place in the Go source (`internal/envconfig`) — verified by grep, not just code review.
+- Restarting the compose stack does not lose Postgres data (named volume, not an anonymous/ephemeral one).
+- `internal/dlog`'s tests still pass after the rename; no other package's public API changes.
+
+---
+
+## Backlog (low priority, revisit opportunistically — not blocking any phase)
+
+- **Verify the `ParseVendorSNMP` fix against a live device capture.** Phase 0 verified it against `gosnmp`'s source and official vendor MIBs (Cisco, MikroTik) plus a fixture-based fake agent — solid, but not the same as a real switch response. Do this the first time Phase 1/2 work has a reachable core switch in front of it; not worth blocking on.
+- **gofmt drift in three pre-existing legacy files** (`backup/diff.go`, `logger/logger.go`, `report/json.go`) — untouched by design during Phase 0 to keep diffs scoped. Clean up in one small, isolated commit once the daemon phases have settled, not mixed into feature work.
+
 ---
 
 ## Phase 1 — AD connectivity + network presence
 
-Note: `bidar import-devices` (Phase 0) currently holds its own SQL directly in `cmd/cli/import_devices.go` because `internal/store` didn't exist yet at the time. Once task 2 below creates `internal/store`, move those four statements into it and have `import-devices` call the store package like everything else — don't leave two places in the codebase writing to `network_devices`/`snmp_profiles`/`ssh_credentials` directly.
+Note: `bidar import-devices` (Phase 0) currently holds its own SQL directly in `cmd/cli/import_devices.go` because `internal/store` didn't exist yet at the time. `internal/store` is a natural first sub-task of the provider work below (tasks 4/8 need it to write `host_observations`/`hosts`) — once it exists, move `import-devices`'s four statements into it too, rather than leaving two places in the codebase writing to `network_devices`/`snmp_profiles`/`ssh_credentials` directly.
+
+Also note: Phase 0 already built `internal/db` (pgx pool + migration runner) and migrations `0001`+`0002`, which cover every Phase 0 **and** Phase 1 table (`subnets`, `buildings`, `snmp_profiles`, `ssh_credentials`, `network_devices`, `dhcp_sources`, `hosts`, `host_observations`, `provider_runs`) in one pass. The two tasks that would normally set this up are already done — see the strikethroughs below.
 
 Tasks:
-1. `internal/config`: env loading, DB connection.
-2. `migrations`: `subnets`, `buildings`, `snmp_profiles`, `network_devices`, `dhcp_sources`, `hosts`, `host_observations`, `provider_runs`.
+1. ~~`internal/config`: env loading, DB connection.~~ Already covered by `internal/db` + `internal/dlog` (Phase 0). Daemon env loading (`BIDAR_*` vars) can stay inline in `cmd/cli/serve.go` unless it grows enough to justify its own package.
+2. ~~`migrations`: subnets/buildings/snmp_profiles/network_devices/dhcp_sources/hosts/host_observations/provider_runs.~~ Already created in `0001_init`/`0002` (Phase 0). If a provider below needs a column that doesn't exist yet, add it via a new numbered migration — don't touch `0001`/`0002`.
 3. Enumerate and record (in `architecture.md` §Open decisions): the list of core/L3 devices for the ARP collector, every DHCP server + its type, and the VLAN number for each configured subnet (where a subnet maps 1:1 to a VLAN). Do this before writing the collectors, not during.
 4. `internal/providers/ad`: LDAP(S) bind, pull computer objects, write to `host_observations`, upsert into `hosts` via matching rules (see `architecture.md` §Phase 1).
 5. `internal/providers/arp`: SNMP query of `ipNetToPhysicalTable`/`ipNetToMediaTable` against every `network_devices` row with `role = 'core'`, capturing the VLAN each entry belongs to (from the SVI/interface being queried), write to `host_observations` including `vlan_number`.
