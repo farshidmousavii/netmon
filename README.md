@@ -37,93 +37,85 @@ Run Directly
 go run ./cmd/bidar [command]
 ```
 
-## Quick Start
+## Quick Start (inventory daemon)
 
-1. Initialize Configuration
-   YAML format (recommended for shared credentials):
+The daemon (AD + ARP + DHCP + ICMP collectors) runs in Docker with Postgres.
+The only files you touch: your device config (`config.yaml` or
+`devices.csv`), `.env`, and the `bidar` CLI. No raw database access needed
+for onboarding.
 
-```bash
-# Creates config.yaml
-./bidar init
-```
-
-CSV format (recommended for bulk import):
+1. **Prepare environment**
 
 ```bash
-./bidar init --format csv
+cp .env.example .env
+# edit .env: set a real BIDAR_MASTER_KEY (openssl rand -base64 32)
+# and a real POSTGRES_PASSWORD. Optionally BIDAR_AD_* to enable the AD
+# provider, and the BIDAR_*_INTERVAL cadences.
 ```
 
-2. Edit Configuration
+2. **Start the database and apply migrations**
 
-YAML (`config.yaml`):
-
-```yaml
-version: 1
-
-credentials:
-  cisco:
-    username: admin
-    password: cisco123
-
-  mikrotik:
-    username: admin
-    password: mikrotik123
-
-devices:
-  - name: core-switch
-    ip: 192.168.1.1
-    port: 22
-    vendor: cisco
-    credential: cisco
-
-snmp:
-  community: public
-  timeout: 10
-
-backup:
-  directory: backups
-  archive_path: ""
+```bash
+docker compose up -d postgres
+docker compose run --rm migrate      # applies schema; safe to re-run
 ```
 
-CSV (`devices.csv`):
+3. **Import your existing device config** (one-time; file -> database,
+   never writes back)
 
-```csv
-#snmp_community=<value> — SNMP community string (default: public)
-#snmp_timeout=<seconds> — SNMP timeout (default: 10)
-#backup_dir=<path> — Backup directory (default: backups)
-#backup_archive=<path> — Archive path for old backups
-name,ip,port,vendor,username,password
-core-switch,192.168.1.1,22,cisco,admin,cisco123
-dist-switch-01,192.168.2.1,22,cisco,admin,cisco123
-access-sw-01,192.168.3.1,22,cisco,admin,cisco123
-edge-router,192.168.4.1,22,mikrotik,admin,mikrotik123
+```bash
+docker compose run --rm bidar import-devices --config /config.yaml   # run inside the container
+# or from the host, with BIDAR_DATABASE_URL pointing at the stack:
+BIDAR_DATABASE_URL=postgres://bidar:PASSWORD@localhost:5432/bidar BIDAR_MASTER_KEY=... \
+  ./bidar import-devices --config config.yaml
 ```
 
-```
-CSV Settings (optional):
-#snmp_community=<value> — SNMP community string (default: public)
-#snmp_timeout=<seconds> — SNMP timeout (default: 10)
-#backup_dir=<path> — Backup directory (default: backups)
-#backup_archive=<path> — Archive path for old backups
+4. **Mark the core/L3 switches** (the ARP collector polls only these)
 
-```
-
-3. Run Commands
-
-```bash#
-Monitor with YAML
-./bidar monitor
-
-# Monitor with CSV
-./bidar monitor --config devices.csv
-
-# Backup only
-./bidar backup
-
-# Execute bulk commands
-./bidar exec --type cisco -c "show version"
+```bash
+docker compose exec bidar /usr/local/bin/bidar devices list                       # see what was imported
+docker compose exec bidar /usr/local/bin/bidar devices list --role=unassigned
+docker compose exec bidar /usr/local/bin/bidar devices set-role <name-or-ip> core # one per core switch
 ```
 
+5. **Point the DHCP sources at their lease-export files** (produced by
+   `scripts/export-dhcp-leases.ps1` on each Windows DHCP server; make the
+   files reachable, e.g. an SMB mount)
+
+```bash
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources list
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path <name> /mnt/dhcp/leases-center.json
+```
+
+6. **Start the daemon**
+
+```bash
+docker compose up -d
+docker compose logs -f bidar          # provider runs land in provider_runs
+docker compose exec bidar /usr/local/bin/bidar hosts   # the live inventory
+```
+
+Role and path changes take effect on the next scheduled poll cycle — no
+daemon restart needed.
+
+### Legacy CLI (monitor / backup / exec / diff / init / tui-config)
+
+The original SSH-based CLI still works exactly as before, reading
+`config.yaml`/`devices.csv` directly. See the sections below.
+
+### Advanced: direct database access (debugging only)
+
+Routine setup goes through the `bidar` commands above. If you need to
+inspect or fix something by hand:
+
+```bash
+docker compose exec -T postgres psql -U bidar -d bidar
+```
+
+Use this for debugging, not as the normal path — if a routine operation
+requires SQL, that is a missing `bidar` subcommand, not a workflow.
+
+# Commands
 # Commands
 
 ## monitor

@@ -53,6 +53,7 @@ type Device struct {
 	MgmtIP         netip.Addr
 	ProtocolFamily string
 	Role           string
+	Enabled        bool
 	SNMPProfileID  *int64
 }
 
@@ -75,6 +76,7 @@ type DHCPSource struct {
 	ID               int64
 	Name             string
 	SourceType       string
+	Enabled          bool
 	ConnectionConfig []byte // jsonb
 	CredentialEnc    []byte
 }
