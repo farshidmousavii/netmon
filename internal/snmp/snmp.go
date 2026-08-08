@@ -9,9 +9,17 @@ import (
 )
 
 func SnmpWalk(ip string, oid []string, community string, timeout int) (string, error) {
+	// Port is hardcoded for CLI compatibility (internal/device calls this).
+	return snmpWalk(ip, 161, oid, community, timeout)
+}
+
+// snmpWalk is the actual implementation, port-parameterized so fixture
+// tests can point it at an ephemeral localhost agent. The exported
+// SnmpWalk keeps its fixed signature and port for internal/device.
+func snmpWalk(ip string, port uint16, oid []string, community string, timeout int) (string, error) {
 	g := &gosnmp.GoSNMP{
 		Target:    ip,
-		Port:      161,
+		Port:      port,
 		Community: community,
 		Version:   gosnmp.Version2c,
 		Timeout:   time.Duration(timeout) * time.Second,
