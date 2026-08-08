@@ -235,38 +235,26 @@ func upsertSSHCredential(ctx context.Context, pool *pgxpool.Pool, enc *crypto.En
 }
 
 // upsertDevice inserts a network_devices row or updates the existing row
-// with the same mgmt_ip. role and the poll-health fields are never touched
-// by an update, so manual core/access assignment survives re-imports.
+// with the same mgmt_ip (unique per migration 0002). role and the
+// poll-health fields are never touched by an update, so manual core/access
+// assignment survives re-imports. ON CONFLICT makes concurrent imports
+// race-free: the unique constraint turns a duplicate insert into an update
+// instead of a second row.
 func upsertDevice(ctx context.Context, pool *pgxpool.Pool, d config.DeviceConfig, family string, snmpProfileID *int64, credID int64) error {
-	var existing int64
-	err := pool.QueryRow(ctx, `SELECT id FROM network_devices WHERE mgmt_ip = $1::inet`, d.IP).Scan(&existing)
-	switch {
-	case err == nil:
-		_, err = pool.Exec(ctx, `
-			UPDATE network_devices SET
-				name = $1,
-				protocol_family = $2,
-				function = NULLIF($3, ''),
-				enabled = true,
-				snmp_profile_id = $4,
-				ssh_credential_id = $5,
-				updated_at = now()
-			WHERE id = $6`,
-			d.Name, family, d.Type, snmpProfileID, credID, existing)
-		if err != nil {
-			return fmt.Errorf("update device: %w", err)
-		}
-		return nil
-	case !errors.Is(err, pgx.ErrNoRows):
-		return fmt.Errorf("look up device: %w", err)
-	}
-
-	_, err = pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, `
 		INSERT INTO network_devices (name, protocol_family, function, role, mgmt_ip, enabled, snmp_profile_id, ssh_credential_id)
-		VALUES ($1, $2, NULLIF($3, ''), 'unassigned', $4::inet, true, $5, $6)`,
+		VALUES ($1, $2, NULLIF($3, ''), 'unassigned', $4::inet, true, $5, $6)
+		ON CONFLICT (mgmt_ip) DO UPDATE SET
+			name = EXCLUDED.name,
+			protocol_family = EXCLUDED.protocol_family,
+			function = EXCLUDED.function,
+			enabled = EXCLUDED.enabled,
+			snmp_profile_id = EXCLUDED.snmp_profile_id,
+			ssh_credential_id = EXCLUDED.ssh_credential_id,
+			updated_at = now()`,
 		d.Name, family, d.Type, d.IP, snmpProfileID, credID)
 	if err != nil {
-		return fmt.Errorf("insert device: %w", err)
+		return fmt.Errorf("upsert device: %w", err)
 	}
 	return nil
 }
