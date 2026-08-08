@@ -266,3 +266,22 @@ func TestRealPingLoopback(t *testing.T) {
 func itoa(n int) string {
 	return strconv.Itoa(n)
 }
+
+// Regression: New(Config{}, ...) must apply the timeout default BEFORE the
+// real pinger is built — the Phase 1 compose smoke test caught the old
+// code passing the raw zero timeout to the pinger, which cancelled every
+// ping instantly (silently reporting all hosts dead).
+func TestNewDefaultsTimeoutBeforePinger(t *testing.T) {
+	// Exercise the defaulting through the constructor path serve.go uses.
+	pool := testdb.Open(t, testdb.ScratchURL(t, testdb.BaseURL(t)))
+	prov, err := New(Config{}, store.New(pool), slog.Default())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if prov.cfg.Timeout != DefaultTimeout {
+		t.Errorf("cfg.Timeout = %v, want DefaultTimeout %v (pinger must see the defaulted value)", prov.cfg.Timeout, DefaultTimeout)
+	}
+	if prov.cfg.Concurrency != DefaultConcurrency {
+		t.Errorf("cfg.Concurrency = %d, want %d", prov.cfg.Concurrency, DefaultConcurrency)
+	}
+}

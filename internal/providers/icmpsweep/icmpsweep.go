@@ -15,6 +15,7 @@ package icmpsweep
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -64,7 +65,11 @@ type Provider struct {
 
 // New returns an ICMP sweep provider using the system ping binary.
 func New(cfg Config, st *store.Store, logger *slog.Logger) (*Provider, error) {
-	return newWithPinger(cfg, st, logger, realPing(cfg.Timeout))
+	p, err := newWithPinger(cfg, st, logger, nil)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // newWithPinger is New with an injectable pinger for tests.
@@ -84,10 +89,12 @@ func newWithPinger(cfg Config, st *store.Store, logger *slog.Logger, ping pinger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	p := &Provider{store: st, logger: logger, cfg: cfg}
 	if ping == nil {
-		ping = realPing(cfg.Timeout)
+		ping = p.realPing
 	}
-	return &Provider{store: st, logger: logger, cfg: cfg, ping: ping}, nil
+	p.ping = ping
+	return p, nil
 }
 
 // Name implements providers.Provider.
@@ -259,17 +266,27 @@ func usableAddresses(p netip.Prefix) []netip.Addr {
 }
 
 // realPing execs the system ping binary: `ping -n -c 1 -W <timeout>`.
-// The exit code is the liveness signal. Requires a working ping on the
-// host (standard on Linux distributions; the container image needs the
-// binary or a raw-socket capability — deployment note in the report).
-func realPing(timeout time.Duration) pinger {
-	return func(ctx context.Context, ip netip.Addr) bool {
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "ping", "-n", "-c", "1",
-			"-W", strconv.Itoa(int(timeout.Seconds())), ip.String())
-		return cmd.Run() == nil
+// The exit code is the liveness signal; a failure other than "host did
+// not answer" (missing binary, permission denied, ...) is logged at
+// debug so a misconfigured sweep is diagnosable instead of silently
+// reporting every host as dead. Requires a working ping on the host
+// (standard on Linux distributions; the container needs the binary or a
+// raw-socket capability — NET_RAW is granted in docker-compose.yml).
+func (p *Provider) realPing(ctx context.Context, ip netip.Addr) bool {
+	ctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ping", "-n", "-c", "1",
+		"-W", strconv.Itoa(int(p.cfg.Timeout.Seconds())), ip.String())
+	err := cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			// Not a normal "no reply" exit: the ping itself is broken.
+			p.logger.Debug("icmpsweep: ping invocation failed", "ip", ip, "err", err)
+		}
+		return false
 	}
+	return true
 }
 
 func (p *Provider) fail(err error) {
