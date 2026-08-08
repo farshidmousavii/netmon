@@ -72,16 +72,21 @@ func ParseVendorSNMP(oid string) string {
 		"11":    "hp",
 	}
 
+	// gosnmp decodes OID *values* with a leading dot (".1.3.6.1.4.1.9.1.414"),
+	// while raw OID strings are conventionally dotless. Normalize so the
+	// enterprise-ID octet is always at index 6 regardless of input form:
+	//   1.3.6.1.4.1.<enterprise>.<...>
+	// (verified against gosnmp v1.43.2: parseObjectIdentifier prepends '.').
+	oid = strings.TrimPrefix(oid, ".")
+
 	parts := strings.Split(oid, ".")
-    if len(parts) < 8 {
-        return "unknown" 
-	} 
+	if len(parts) < 7 {
+		return "unknown"
+	}
 
-    enterpriseID := parts[7]
-    if vendor, ok := enterpriseMAP[enterpriseID]; ok {
-        return vendor
-    }
-    return "unknown"
-
+	enterpriseID := parts[6]
+	if vendor, ok := enterpriseMAP[enterpriseID]; ok {
+		return vendor
+	}
+	return "unknown"
 }
-
