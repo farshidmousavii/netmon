@@ -232,6 +232,16 @@ Do not pull work from this list forward without explicitly updating `roadmap.md`
 
 1. **Network-presence mechanism — resolved**: not a single mechanism. Three collectors run in parallel: SNMP ARP reads from *all* core/L3 switches, DHCP lease reads from *all* configured DHCP sources (multi-type), and ICMP sweep as a fast freshness fallback. See §Phase 1 above.
 
+2. **Deployment data lives only in the database — resolved**: the operator's real infrastructure (device names/IPs, credentials, DHCP servers, subnets, VLANs) is recorded **only** in the Postgres tables (`network_devices`, `subnets`, `dhcp_sources`, `snmp_profiles`, `ssh_credentials`) and in gitignored local files — never in this repo. The rows were loaded 2026-08-08 via `bidar import-devices --config config.yaml` (the operator's current device file; `devices.csv` is a stale subset and is not used) plus operator-confirmed role/subnet/DHCP inserts. To see the live values: query the database; the docs record decisions, not addresses.
+
+3. **Core/L3 devices for the ARP collector — resolved**: exactly three Cisco switches, one per building, marked `role = 'core'` in `network_devices`. Which rows: `SELECT name, mgmt_ip FROM network_devices WHERE role = 'core'`.
+
+4. **DHCP source inventory — resolved**: three Windows DHCP servers, one per building, all `source_type = 'windows'` in `dhcp_sources`; host addresses live in each row's `connection_config`. WMI/PowerShell credentials are still required before the Phase 1 DHCP collector can authenticate (see Open decisions).
+
+5. **Subnet list — resolved**: eleven rows in `subnets` (labels per building/function), `vlan_number` NULL until the operator sets it (see Open decisions). Further subnet additions/edits are operator-managed.
+
+6. **Role assignment status (post-import)**: 68 devices imported from `config.yaml`; 3 `core`; the remaining 65 (38 cisco_snmp, 27 mikrotik_routeros) are `role = 'unassigned'` and will be assigned `access` when Phase 2 polling starts — nothing is polled until then.
+
 ## A note on open-sourcing this project
 
 This project is meant to be published as open source, not built only for one environment. That means: **the number of core switches, the number/type of DHCP servers, subnet lists, credentials, and building names are deployment data — rows in `network_devices` / `dhcp_sources` / `subnets` — never hardcoded in code, migrations, or these docs.** A given deployment (e.g. three Cisco cores plus a Windows and a MikroTik DHCP server) is configured after install, the same way any number of cores or DHCP sources of any type would be. Keep this in mind while implementing: if a piece of code only works for exactly one core switch or assumes a specific vendor pairing, that's a bug, not a shortcut.
@@ -245,7 +255,6 @@ Practical open-source housekeeping to do before/around Phase 1, separate from th
 
 Deliberately left as choices rather than decided here — record the answer as deployment configuration (not in this file) once chosen for a given deployment:
 
-1. **Which devices count as "core/L3" for the ARP collector** — needs an explicit list per deployment.
-2. **DHCP source inventory** — enumerate every DHCP server in the environment and its type, per deployment.
-3. **AD service account credential source** — env var is fine for a single-operator system; per-deployment.
-4. **Subnet list source** — a small `subnets` table from day one is recommended over hardcoded config, since more will be added over time.
+1. **Subnet → VLAN mapping** (`subnets.vlan_number`) — VLANs differ per building; the operator will set them manually via dashboard/TUI later. Until then, `vlan_number` stays NULL and the inferred-VLAN feature reports nothing for these subnets.
+2. **Windows DHCP collector credentials** — the three Windows DHCP sources need a WMI/PowerShell account before the Phase 1 DHCP collector can authenticate. The operator will not share domain-admin credentials — a dedicated read-only account (or an alternative credential path) must be arranged; the collector must treat sources with missing credentials as unhealthy, never crash.
+3. **AD service account credential source** — env var is fine for a single-operator system; per-deployment. Same constraint as #2: the operator will not share a domain-admin account, so a dedicated read-only AD bind account is required before the AD provider can run.
