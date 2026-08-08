@@ -21,6 +21,21 @@ const (
 	// debug | info | warn | error (default info).
 	LogLevel = "BIDAR_LOG_LEVEL"
 
+	// ADURL is the Active Directory LDAP(S) endpoint for the AD provider
+	// (Phase 1), e.g. ldaps://<dc-hostname>.
+	ADURL = "BIDAR_AD_URL"
+
+	// ADBindDN is the read-only service account DN used to bind to AD.
+	ADBindDN = "BIDAR_AD_BIND_DN"
+
+	// ADBindPassword is the service account password (env var, never
+	// logged or committed).
+	ADBindPassword = "BIDAR_AD_BIND_PASSWORD"
+
+	// ADBaseDN is the search base for computer objects, e.g.
+	// "DC=corp,DC=local".
+	ADBaseDN = "BIDAR_AD_BASE_DN"
+
 	// TestDatabaseURL points integration tests at a scratch Postgres
 	// (test-only; not a runtime configuration variable).
 	TestDatabaseURL = "BIDAR_TEST_DATABASE_URL"
