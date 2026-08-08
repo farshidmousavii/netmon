@@ -126,33 +126,58 @@ func TestWalkTablePreCancelledContext(t *testing.T) {
 }
 
 // TestWalkTableMidWalkCancellation: cancellation while the walk is between
-// bulk round-trips aborts it. Deterministic by construction: the agent
-// takes 400ms per request, MaxOids forces one varbind per round trip (so
-// three entries need three requests), and the context dies at 1s — during
-// the third request, whose response cannot arrive before 1.2s.
+// bulk round-trips aborts it. Fully deterministic: the fake agent gates
+// every response behind a release channel, so the test holds the walk
+// mid-flight (after two of the three MaxOids=1 round trips), cancels the
+// context, then releases — the third response arrives into a cancelled
+// walk and aborts it. No sleeps, immune to load.
 func TestWalkTableMidWalkCancellation(t *testing.T) {
 	a := newFakeAgent(t, []fixtureEntry{
 		{oid: ipNetToMediaIfIndex + ".10.0.0.1", typ: gosnmp.Integer, value: 2},
 		{oid: ipNetToMediaIfIndex + ".10.0.0.2", typ: gosnmp.Integer, value: 2},
 		{oid: ipNetToMediaIfIndex + ".10.0.0.5", typ: gosnmp.Integer, value: 4},
 	})
-	a.delay = 400 * time.Millisecond
+	// Gate the THIRD request (the walk's last round trip): the first two
+	// responses flow freely so the walk is genuinely mid-flight when we
+	// cancel.
+	a.gateAt = 3
+	a.release = make(chan struct{})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	walkDone := make(chan error, 1)
+	go func() {
+		_, err := WalkTable(ctx, Config{
+			Target:    "127.0.0.1",
+			Port:      uint16(a.port()),
+			Community: "public",
+			MaxOids:   1, // one varbind per round trip -> 3 round trips
+			Timeout:   10 * time.Second,
+		}, ipNetToMediaIfIndex)
+		walkDone <- err
+	}()
 
-	_, err := WalkTable(ctx, Config{
-		Target:    "127.0.0.1",
-		Port:      uint16(a.port()),
-		Community: "public",
-		MaxOids:   1, // one varbind per round trip -> 3 round trips
-		Timeout:   5 * time.Second,
-	}, ipNetToMediaIfIndex)
-	if err == nil {
-		t.Fatal("expected error for mid-walk cancellation")
+	// Wait until the third request is in flight (gated), then cancel and
+	// release it into a cancelled walk.
+	deadline := time.Now().Add(10 * time.Second)
+	for a.requests.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected context.DeadlineExceeded, got %v", err)
+	if a.requests.Load() < 3 {
+		t.Fatalf("walk made only %d requests; cannot hold it mid-flight", a.requests.Load())
+	}
+	cancel()
+	close(a.release)
+
+	select {
+	case err := <-walkDone:
+		if err == nil {
+			t.Fatal("expected error for mid-walk cancellation")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("walk did not abort after cancellation")
 	}
 }
 

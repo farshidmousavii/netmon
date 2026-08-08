@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,7 +41,15 @@ type fakeAgent struct {
 	t       *testing.T
 	entries []fixtureEntry // sorted by OID (component-wise)
 	delay   time.Duration  // optional per-request response delay
+	// gateAt, when > 0, blocks the response to the gateAt-th request
+	// until release is closed — lets tests hold a walk mid-flight
+	// deterministically.
+	gateAt  int64
+	release chan struct{}
 	conn    net.PacketConn
+	// requests counts received datagrams (atomic; read by tests to know
+	// how far a walk has progressed).
+	requests atomic.Int64
 }
 
 func newFakeAgent(t *testing.T, entries []fixtureEntry) *fakeAgent {
@@ -70,8 +79,12 @@ func (a *fakeAgent) serve() {
 		if err != nil {
 			return // listener closed
 		}
+		req := a.requests.Add(1)
 		if a.delay > 0 {
 			time.Sleep(a.delay)
+		}
+		if a.gateAt > 0 && req == a.gateAt && a.release != nil {
+			<-a.release
 		}
 		resp := a.handle(buf[:n])
 		if resp != nil {
