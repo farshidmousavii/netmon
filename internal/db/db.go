@@ -27,12 +27,15 @@ import (
 	// runner below.
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/farshidmousavii/bidar/migrations"
 )
 
-// DatabaseURLEnv is the environment variable holding the Postgres
-// connection string. Pinned in docs/roadmap.md Phase 0.
-const DatabaseURLEnv = "BIDAR_DATABASE_URL"
+// DatabaseURLEnv is an alias for envconfig.DatabaseURL kept so this
+// package's tests reference the same name as before. New code should use
+// envconfig.DatabaseURL directly — internal/envconfig is the single
+// source of truth for BIDAR_* names.
+const DatabaseURLEnv = envconfig.DatabaseURL
 
 // pingTimeout bounds the fail-fast connectivity check in Open.
 const pingTimeout = 10 * time.Second
@@ -41,9 +44,9 @@ const pingTimeout = 10 * time.Second
 // It errors loudly rather than defaulting to anything -- a silently guessed
 // database would be worse than no database.
 func DatabaseURLFromEnv() (string, error) {
-	url := os.Getenv(DatabaseURLEnv)
+	url := os.Getenv(envconfig.DatabaseURL)
 	if url == "" {
-		return "", fmt.Errorf("%s is not set: set it to a Postgres connection string (e.g. postgres://user:pass@host:5432/bidar)", DatabaseURLEnv)
+		return "", fmt.Errorf("%s is not set: set it to a Postgres connection string (e.g. postgres://user:pass@host:5432/bidar)", envconfig.DatabaseURL)
 	}
 	return url, nil
 }

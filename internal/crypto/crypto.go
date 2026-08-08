@@ -19,11 +19,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 )
 
-// MasterKeyEnv is the environment variable holding the master key as
-// base64-encoded 32 bytes. Pinned in docs/roadmap.md Phase 0.
-const MasterKeyEnv = "BIDAR_MASTER_KEY"
+// MasterKeyEnv is an alias for envconfig.MasterKey kept so this package's
+// tests reference the same name as before. New code should use
+// envconfig.MasterKey directly — internal/envconfig is the single source
+// of truth for BIDAR_* names.
+const MasterKeyEnv = envconfig.MasterKey
 
 // keySize is the AES-256 key length in bytes.
 const keySize = 32
@@ -56,7 +60,7 @@ type Encryptor struct {
 // the BIDAR_MASTER_KEY path.
 func New(key []byte) (*Encryptor, error) {
 	if len(key) != keySize {
-		return nil, fmt.Errorf("%s must decode to exactly %d bytes (AES-256), got %d", MasterKeyEnv, keySize, len(key))
+		return nil, fmt.Errorf("%s must decode to exactly %d bytes (AES-256), got %d", envconfig.MasterKey, keySize, len(key))
 	}
 
 	block, err := aes.NewCipher(key)
@@ -78,14 +82,14 @@ func New(key []byte) (*Encryptor, error) {
 // irrecoverably. Validation happens here, at the point of use, not at
 // process startup: commands that never call this never fail on the env var.
 func NewFromEnv() (*Encryptor, error) {
-	raw := strings.TrimSpace(os.Getenv(MasterKeyEnv))
+	raw := strings.TrimSpace(os.Getenv(envconfig.MasterKey))
 	if raw == "" {
-		return nil, fmt.Errorf("%s is not set: set it to a base64-encoded %d-byte key (e.g. `openssl rand -base64 32`)", MasterKeyEnv, keySize)
+		return nil, fmt.Errorf("%s is not set: set it to a base64-encoded %d-byte key (e.g. `openssl rand -base64 32`)", envconfig.MasterKey, keySize)
 	}
 
 	key, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", MasterKeyEnv, err)
+		return nil, fmt.Errorf("decode %s: %w", envconfig.MasterKey, err)
 	}
 
 	return New(key)

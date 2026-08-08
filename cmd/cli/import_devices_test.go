@@ -24,6 +24,7 @@ import (
 
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -33,7 +34,7 @@ var testMasterKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xAB},
 
 func importTestEnv(t *testing.T) (string, string) {
 	t.Helper()
-	url := os.Getenv("BIDAR_TEST_DATABASE_URL")
+	url := os.Getenv(envconfig.TestDatabaseURL)
 	if url == "" {
 		t.Skip("BIDAR_TEST_DATABASE_URL not set; skipping import-devices integration test")
 	}
@@ -435,7 +436,7 @@ func TestImportDevicesFailFastOrder(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error with BIDAR_MASTER_KEY unset")
 	}
-	if !strings.Contains(err.Error(), "BIDAR_MASTER_KEY") {
+	if !strings.Contains(err.Error(), envconfig.MasterKey) {
 		t.Errorf("error should mention BIDAR_MASTER_KEY, got: %v", err)
 	}
 
@@ -445,7 +446,7 @@ func TestImportDevicesFailFastOrder(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error with BIDAR_DATABASE_URL unset")
 	}
-	if !strings.Contains(err.Error(), "BIDAR_DATABASE_URL") {
+	if !strings.Contains(err.Error(), envconfig.DatabaseURL) {
 		t.Errorf("error should mention BIDAR_DATABASE_URL, got: %v", err)
 	}
 }

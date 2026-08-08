@@ -15,6 +15,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/farshidmousavii/bidar/migrations"
 )
 
@@ -33,7 +34,7 @@ import (
 //	  go test ./internal/db/ -run TestMigrateIntegration -v
 func testDatabaseURL(t *testing.T) string {
 	t.Helper()
-	url := os.Getenv("BIDAR_TEST_DATABASE_URL")
+	url := os.Getenv(envconfig.TestDatabaseURL)
 	if url == "" {
 		t.Skip("BIDAR_TEST_DATABASE_URL not set; skipping Postgres integration test")
 	}

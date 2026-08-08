@@ -14,15 +14,16 @@ import (
 
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 )
 
 // serveTestEnv sets the daemon env vars against the shared test database
 // (migrated, idempotently) and returns the URL.
 func serveTestEnv(t *testing.T) string {
 	t.Helper()
-	base := os.Getenv("BIDAR_TEST_DATABASE_URL")
+	base := os.Getenv(envconfig.TestDatabaseURL)
 	if base == "" {
-		t.Skip("BIDAR_TEST_DATABASE_URL not set; skipping serve/migrate integration test")
+		t.Skip(envconfig.TestDatabaseURL + " not set; skipping serve/migrate integration test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -31,13 +32,14 @@ func serveTestEnv(t *testing.T) string {
 	}
 	t.Setenv(db.DatabaseURLEnv, base)
 	t.Setenv(crypto.MasterKeyEnv, testMasterKey)
-	t.Setenv(dlogLevelEnvForTest, "debug")
+	t.Setenv(daemonLogLevelEnv, "debug")
 	return base
 }
 
-// dlogLevelEnvForTest mirrors internal/dlog.LevelEnv; the package is not
-// imported here to keep this file focused, but the env var name is stable.
-const dlogLevelEnvForTest = "BIDAR_LOG_LEVEL"
+// The daemon log level env var, via the single source of truth. (Renamed
+// from the misleading "dlogLevelEnvForTest": this is the real production
+// env var name, not test-only.)
+const daemonLogLevelEnv = envconfig.LogLevel
 
 // serveScratchDB creates an UN-migrated database for the schema-missing
 // test and registers cleanup.
@@ -101,7 +103,7 @@ func TestMigrateSchemaEnvUnset(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error with BIDAR_DATABASE_URL unset")
 	}
-	if !strings.Contains(err.Error(), "BIDAR_DATABASE_URL") {
+	if !strings.Contains(err.Error(), envconfig.DatabaseURL) {
 		t.Errorf("error should mention BIDAR_DATABASE_URL, got: %v", err)
 	}
 }
@@ -139,21 +141,21 @@ func TestServeStubMissingMasterKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error with BIDAR_MASTER_KEY unset")
 	}
-	if !strings.Contains(err.Error(), "BIDAR_MASTER_KEY") {
+	if !strings.Contains(err.Error(), envconfig.MasterKey) {
 		t.Errorf("error should mention BIDAR_MASTER_KEY, got: %v", err)
 	}
 }
 
 func TestServeStubSchemaNotMigrated(t *testing.T) {
-	base := os.Getenv("BIDAR_TEST_DATABASE_URL")
+	base := os.Getenv(envconfig.TestDatabaseURL)
 	if base == "" {
-		t.Skip("BIDAR_TEST_DATABASE_URL not set; skipping serve integration test")
+		t.Skip(envconfig.TestDatabaseURL + " not set; skipping serve integration test")
 	}
 	scratch := serveScratchDB(t, base)
 
 	t.Setenv(db.DatabaseURLEnv, scratch)
 	t.Setenv(crypto.MasterKeyEnv, testMasterKey)
-	t.Setenv(dlogLevelEnvForTest, "info")
+	t.Setenv(daemonLogLevelEnv, "info")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

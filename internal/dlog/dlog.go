@@ -13,12 +13,15 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 )
 
-// LevelEnv is the environment variable controlling the daemon log level.
-// Accepted values: debug | info | warn | error (case-insensitive).
-// Default: info. Pinned in docs/roadmap.md Phase 0.
-const LevelEnv = "BIDAR_LOG_LEVEL"
+// LevelEnv is an alias for envconfig.LogLevel kept so this package's tests
+// reference the same name as before. New code should use
+// envconfig.LogLevel directly — internal/envconfig is the single source of
+// truth for BIDAR_* names.
+const LevelEnv = envconfig.LogLevel
 
 // Options configures a daemon logger. Zero values are fine: Level zero is
 // slog.LevelInfo, and a nil Out falls back to os.Stdout.
@@ -49,7 +52,7 @@ func New(opts Options) *slog.Logger {
 // constructing a logger — handy for callers that want to log the resolved
 // level as a structured field.
 func LevelFromEnv() (slog.Level, error) {
-	return parseLevel(os.Getenv(LevelEnv))
+	return parseLevel(os.Getenv(envconfig.LogLevel))
 }
 
 // NewFromEnv builds the daemon logger from the environment: level from
@@ -71,7 +74,7 @@ func parseLevel(raw string) (slog.Level, error) {
 	}
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(raw)); err != nil {
-		return 0, fmt.Errorf("%s: invalid level %q (use debug|info|warn|error): %w", LevelEnv, raw, err)
+		return 0, fmt.Errorf("%s: invalid level %q (use debug|info|warn|error): %w", envconfig.LogLevel, raw, err)
 	}
 	return level, nil
 }
