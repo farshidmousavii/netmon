@@ -83,7 +83,7 @@ Tasks:
 7. `internal/providers/icmpsweep`: ping sweep of enabled `subnets`, write to `host_observations`.
 8. Reconciliation: upsert `host_observations` into `hosts` via the matching rules in `architecture.md` §Phase 1, regardless of which collector produced the observation.
 9. Minimal way to inspect `hosts` (a CLI subcommand or direct SQL is fine — the full REST API is Phase 4).
-10. Scheduler: AD sync daily, ARP poll every N minutes, DHCP poll every N minutes, ICMP sweep every N minutes (all configurable) as goroutines with basic error handling, logging to `provider_runs`. The full lease-based job queue (`discovery_jobs`) arrives in Phase 2 when concurrent polling of ~50-70 devices needs it — plain goroutines are enough for four collectors. Env vars: `BIDAR_AD_INTERVAL` (default `24h`), `BIDAR_ARP_INTERVAL` / `BIDAR_DHCP_INTERVAL` / `BIDAR_ICMP_INTERVAL` (default `5m` each) — pinned here per AGENTS.md §6. **Also required here**: the Dockerfile/compose stack must grant `icmpsweep` raw-socket capability — the container runs nonroot per Phase 0's Dockerfile, and `icmpsweep` execs the system `ping` binary, which needs `CAP_NET_RAW`. Add `cap_add: [NET_RAW]` to the `bidar` service in `docker-compose.yml`, or `setcap cap_net_raw+ep` on the `ping` binary in the Dockerfile — either works, pick one and verify `icmpsweep` actually pings something from inside the real container, not just from `go test`.
+10. Scheduler: AD sync daily, ARP poll every N minutes, DHCP poll every N minutes, ICMP sweep every N minutes (all configurable) as goroutines with basic error handling, logging to `provider_runs`. The full lease-based job queue (`discovery_jobs`) arrives in Phase 2 when concurrent polling of ~50-70 devices needs it — plain goroutines are enough for four collectors. **Also required here**: the Dockerfile/compose stack must grant `icmpsweep` raw-socket capability — the container runs nonroot per Phase 0's Dockerfile, and `icmpsweep` execs the system `ping` binary, which needs `CAP_NET_RAW`. Add `cap_add: [NET_RAW]` to the `bidar` service in `docker-compose.yml`, or `setcap cap_net_raw+ep` on the `ping` binary in the Dockerfile — either works, pick one and verify `icmpsweep` actually pings something from inside the real container, not just from `go test`.
 
 DoD:
 - All four collectors run on their own schedule without crashing the process when any of the others (or AD) is down.
@@ -92,6 +92,24 @@ DoD:
 - A host on a VLAN with no direct relationship to AD or a single gateway still shows up (via ARP from a core switch or a DHCP lease).
 - `hosts.current_vlan` is populated (from subnet config or ARP SVI) for hosts where either is available, with `vlan_source` correctly labeled — clearly distinguishable from the switch-verified value Phase 3 will later provide.
 - You can answer "is this AD hostname currently online" and "what's on the network that isn't in AD" from `hosts`.
+
+**Status: built, wired, and running.** All four collectors, the scheduler, `provider_runs` logging, panic isolation, and graceful shutdown are implemented and verified — against fixtures/synthetic data in tests, and live inside the real Docker Compose stack (ICMP genuinely pinging through `CAP_NET_RAW`, ARP/DHCP correctly running-and-failing when the sandbox has no LAN/file access rather than crashing). What's left is environmental, not code: deploy on a host with real network reachability, set `dhcp_sources.connection_config.path` for the three Windows sources to wherever the scheduled-task JSON lands, and supply the AD bind account env vars — then confirm against the real network.
+
+### Phase 1 addendum — admin CLI for routine setup (no raw SQL)
+
+Added after real-world onboarding surfaced a UX problem: assigning `role = 'core'` to a device and setting a DHCP source's export-file path both required a hand-written `psql UPDATE`. That's not acceptable as the normal path — an operator should never need direct SQL access to do routine setup.
+
+Tasks:
+1. `bidar devices list [--role=<core|access|unassigned>]` — table of `network_devices` (name, mgmt_ip, protocol_family, role, enabled), optionally filtered by role.
+2. `bidar devices set-role <name-or-mgmt_ip> <core|access|unassigned>` — updates `network_devices.role`. Validates the role value; clear error on an unknown device. Safe to run against a live `bidar serve` — no downtime, no restart required (the scheduler reads `role` fresh each ARP poll cycle).
+3. `bidar dhcp-sources list` — table of `dhcp_sources` (name, source_type, whether `connection_config` looks configured, last poll status/error joined from `provider_runs` if that's a cheap query — skip the join if it complicates this task, list is still useful without it).
+4. `bidar dhcp-sources set-path <name> <path>` — updates `connection_config.path` for a `source_type = 'windows'` row. Clean error (not silent no-op) if the named source isn't `windows` — other types don't use a file path in Phase 1.
+5. `README.md`: a real "Quick Start" section using only `bidar` subcommands end-to-end (`import-devices` → `devices list`/`set-role` → `dhcp-sources set-path` → `docker compose up`) — zero raw SQL in the documented path. Direct DB access remains available for debugging, just not part of the onboarding story anymore.
+6. AD configuration stays via `.env` (`BIDAR_AD_*`) — it's one-time setup-time secret/config, not a repeated per-resource operation like devices or DHCP sources, so environment variables remain the right shape there; no CLI command needed.
+
+DoD:
+- A new operator can go from a fresh `config.yaml`/`devices.csv` to a fully configured, running daemon using only `bidar` commands and editing `.env` — no `psql` step anywhere in the documented flow.
+- `bidar devices set-role` and `bidar dhcp-sources set-path` take effect on the next scheduled poll cycle without restarting `bidar serve`.
 
 ---
 

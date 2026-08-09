@@ -57,6 +57,13 @@ const (
 	// default 5m).
 	ICMPInterval = "BIDAR_ICMP_INTERVAL"
 
+	// DHCPShareSrc is the host/Windows side of the share compose mounts
+	// read-only at /mnt/dhcp inside the daemon container (from the
+	// compose-level DHCP_SHARE_SRC). The CLI uses it to translate a
+	// Windows share path given to dhcp-sources set-path into the
+	// container-internal path.
+	DHCPShareSrc = "BIDAR_DHCP_SHARE_SRC"
+
 	// TestDatabaseURL points integration tests at a scratch Postgres
 	// (test-only; not a runtime configuration variable).
 	TestDatabaseURL = "BIDAR_TEST_DATABASE_URL"

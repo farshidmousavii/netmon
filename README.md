@@ -92,12 +92,22 @@ docker compose exec bidar /usr/local/bin/bidar dhcp-sources add ros-dhcp mikroti
 docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path center-dhcp /mnt/dhcp/leases-center.json
 ```
 
-   **Paths are container-internal.** `set-path` stores the path as the
-   daemon sees it inside its Linux container. Make the SMB share
-   reachable there by setting `DHCP_SHARE_SRC` in `.env` — on Windows
-   (Docker Desktop) that's a UNC path like `//dc01/dhcp$` or a mapped
-   drive letter; on Linux any host path — compose mounts it read-only at
-   `/mnt/dhcp`, so the source path is `/mnt/dhcp/<file>`.
+   **Both path forms work in `set-path`.** The daemon reads the path as
+   seen inside its Linux container, but you don't have to translate by
+   hand: set `DHCP_SHARE_SRC` in `.env` to the share you actually see
+   (on Windows/Docker Desktop: `//dc01/dhcp$` or a mapped drive letter
+   like `Z:/dhcp`; on Linux: any host path), and compose mounts it
+   read-only at `/mnt/dhcp`. Then either form is accepted:
+
+```bash
+# the Windows path you see on your machine — translated automatically:
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path center-dhcp '\\dc01\dhcp$\leases.json'
+# or the container-internal path directly:
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path center-dhcp /mnt/dhcp/leases.json
+```
+
+   A Windows-style path that doesn't match the configured share is
+   stored but warned about — the daemon can only read mounted paths.
    (If your DHCP servers are plain member servers, the WinRM method in
    `docs/architecture.md` is the future alternative — Phase 1 uses the
    file export only.)

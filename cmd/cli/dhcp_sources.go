@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/domain"
+	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/farshidmousavii/bidar/internal/logger"
 	"github.com/farshidmousavii/bidar/internal/store"
 	"github.com/spf13/cobra"
@@ -205,6 +207,10 @@ func dhcpStatus(src domain.DHCPSource) string {
 	}
 }
 
+// dhcpMountPoint is where docker-compose.yml mounts the DHCP share
+// inside the daemon container.
+const dhcpMountPoint = "/mnt/dhcp"
+
 func runDHCPSourcesSetPath(cmd *cobra.Command, args []string) {
 	if err := logger.Init(false); err != nil {
 		log.Fatal(err)
@@ -214,6 +220,14 @@ func runDHCPSourcesSetPath(cmd *cobra.Command, args []string) {
 	path := strings.TrimSpace(args[1])
 	if path == "" {
 		log.Fatal("path cannot be empty")
+	}
+
+	// Accept both the container-internal form (/mnt/dhcp/...) and the
+	// host/Windows form (\\server\share\... or Z:\...) the operator
+	// actually sees; the latter is translated against BIDAR_DHCP_SHARE_SRC.
+	path, warn := translateDHCPPath(os.Getenv(envconfig.DHCPShareSrc), dhcpMountPoint, path)
+	if warn != "" {
+		logger.Warning("%s", warn)
 	}
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
@@ -240,4 +254,51 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// translateDHCPPath maps the path an operator types into the path the
+// daemon container can actually read:
+//
+//   - already container-internal (starts with mountPoint) -> unchanged;
+//   - starts with the configured share src (shareSrc) -> rewritten to
+//     mountPoint/<relative>, handling Windows separators and UNC/drive
+//     letter forms;
+//   - anything else -> stored as-is, with a warning when it looks like a
+//     Windows path that doesn't match the configured share (the daemon
+//     can only read mounted paths).
+func translateDHCPPath(shareSrc, mountPoint, given string) (string, string) {
+	g := normalizeWinPath(given)
+	if mountPoint != "" && (g == mountPoint || strings.HasPrefix(g, mountPoint+"/")) {
+		return g, ""
+	}
+
+	src := normalizeWinPath(shareSrc)
+	if src == "" || src == "." || src == ".." || strings.HasPrefix(src, "./") {
+		// No meaningful share configured: keep the path verbatim.
+		return given, ""
+	}
+
+	lowerG, lowerSrc := strings.ToLower(g), strings.ToLower(src)
+	switch {
+	case lowerG == lowerSrc:
+		return mountPoint, ""
+	case strings.HasPrefix(lowerG, lowerSrc+"/"):
+		return mountPoint + "/" + g[len(src)+1:], ""
+	case looksLikeWindowsPath(g):
+		return given, fmt.Sprintf("path %q does not start with the configured share %q (mounted at %s); the daemon can only read mounted paths",
+			given, shareSrc, mountPoint)
+	default:
+		return given, ""
+	}
+}
+
+// normalizeWinPath converts Windows separators to forward slashes.
+func normalizeWinPath(p string) string {
+	return strings.TrimRight(strings.ReplaceAll(p, "\\", "/"), "/")
+}
+
+// looksLikeWindowsPath reports whether p is a UNC path (//server/share)
+// or a drive-letter path (Z:/...).
+func looksLikeWindowsPath(p string) bool {
+	return strings.HasPrefix(p, "//") || (len(p) >= 2 && p[1] == ':')
 }
