@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/domain"
 	"github.com/farshidmousavii/bidar/internal/logger"
@@ -47,6 +48,105 @@ func init() {
 	rootCmd.AddCommand(dhcpSourcesCmd)
 	dhcpSourcesCmd.AddCommand(dhcpSourcesListCmd)
 	dhcpSourcesCmd.AddCommand(dhcpSourcesSetPathCmd)
+}
+
+var dhcpSourcesAddCmd = &cobra.Command{
+	Use:   "add <name> <windows|mikrotik|isc|other>",
+	Short: "Add a DHCP source",
+	Long: `Add a DHCP lease evidence source.
+
+  windows:  --path <file>  lease-export file (as seen inside the daemon
+                           container; mount the SMB share into the
+                           container first, e.g. at /mnt/dhcp). Optional
+                           here — set later with set-path.
+  mikrotik: --host <addr> --username <user> --password <pass>
+                           RouterOS API credentials (password is
+                           encrypted at rest with BIDAR_MASTER_KEY).
+  isc/other: no extra fields (not collected in Phase 1).
+
+The daemon picks the new source up on its next poll cycle — no restart.`,
+	Args: cobra.ExactArgs(2),
+	Run:  runDHCPSourcesAdd,
+}
+
+func init() {
+	rootCmd.AddCommand(dhcpSourcesCmd)
+	dhcpSourcesCmd.AddCommand(dhcpSourcesListCmd)
+	dhcpSourcesCmd.AddCommand(dhcpSourcesSetPathCmd)
+	dhcpSourcesCmd.AddCommand(dhcpSourcesAddCmd)
+
+	dhcpSourcesAddCmd.Flags().String("host", "", "RouterOS API host (mikrotik)")
+	dhcpSourcesAddCmd.Flags().String("username", "", "RouterOS API username (mikrotik)")
+	dhcpSourcesAddCmd.Flags().String("password", "", "RouterOS API password (mikrotik; encrypted at rest)")
+	dhcpSourcesAddCmd.Flags().String("path", "", "lease-export file path (windows)")
+}
+
+func runDHCPSourcesAdd(cmd *cobra.Command, args []string) {
+	if err := logger.Init(false); err != nil {
+		log.Fatal(err)
+	}
+
+	name := strings.TrimSpace(args[0])
+	sourceType := strings.TrimSpace(args[1])
+	if !store.ValidDHCPSourceTypes[sourceType] {
+		log.Fatalf("invalid source type %q (use windows, mikrotik, isc or other)", sourceType)
+	}
+
+	host, _ := cmd.Flags().GetString("host")
+	username, _ := cmd.Flags().GetString("username")
+	password, _ := cmd.Flags().GetString("password")
+	path, _ := cmd.Flags().GetString("path")
+
+	cfg := map[string]any{}
+	switch sourceType {
+	case "windows":
+		if path != "" {
+			cfg["path"] = path
+		}
+	case "mikrotik":
+		if host == "" || username == "" || password == "" {
+			log.Fatal("mikrotik sources need --host, --username and --password")
+		}
+		cfg["host"] = host
+		cfg["username"] = username
+	default:
+		// isc/other: no extra fields in Phase 1.
+	}
+	connConfig, err := json.Marshal(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Only mikrotik carries a credential to encrypt.
+	var credEnc []byte
+	if password != "" {
+		enc, err := crypto.NewFromEnv()
+		if err != nil {
+			log.Fatal(err)
+		}
+		credEnc, err = enc.Encrypt([]byte(password))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	databaseURL, err := db.DatabaseURLFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pool.Close()
+
+	id, err := store.New(pool).AddDHCPSource(ctx, name, sourceType, connConfig, credEnc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("source %d (%s, %s) added\n", id, name, sourceType)
 }
 
 func runDHCPSourcesList(cmd *cobra.Command, args []string) {

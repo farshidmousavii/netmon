@@ -158,3 +158,44 @@ func TestSetDHCPSourcePath(t *testing.T) {
 		t.Errorf("unknown source: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestAddDHCPSource(t *testing.T) {
+	st := newAdminStore(t)
+	ctx := context.Background()
+
+	id, err := st.AddDHCPSource(ctx, "win-2", "windows", []byte(`{"path": "/mnt/dhcp/a.json"}`), nil)
+	if err != nil {
+		t.Fatalf("add windows source: %v", err)
+	}
+	if id == 0 {
+		t.Error("expected a real id")
+	}
+
+	// Duplicate name: clear error.
+	if _, err := st.AddDHCPSource(ctx, "win-2", "windows", []byte(`{}`), nil); err == nil {
+		t.Error("expected error for duplicate name")
+	}
+
+	// Mikrotik with encrypted credential bytes.
+	cred := []byte{0x01, 0x02, 0x03}
+	if _, err := st.AddDHCPSource(ctx, "ros-2", "mikrotik", []byte(`{"host": "192.0.2.13", "username": "admin"}`), cred); err != nil {
+		t.Fatalf("add mikrotik source: %v", err)
+	}
+
+	// Invalid type rejected.
+	if _, err := st.AddDHCPSource(ctx, "bad", "sql", []byte(`{}`), nil); err == nil {
+		t.Error("expected error for invalid source type")
+	}
+	// Empty name rejected.
+	if _, err := st.AddDHCPSource(ctx, "  ", "windows", []byte(`{}`), nil); err == nil {
+		t.Error("expected error for empty name")
+	}
+
+	sources, err := st.ListAllDHCPSources(ctx)
+	if err != nil {
+		t.Fatalf("ListAllDHCPSources: %v", err)
+	}
+	if len(sources) != 2 {
+		t.Errorf("sources = %d, want 2", len(sources))
+	}
+}

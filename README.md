@@ -78,14 +78,29 @@ docker compose exec bidar /usr/local/bin/bidar devices list --role=unassigned
 docker compose exec bidar /usr/local/bin/bidar devices set-role <name-or-ip> core # one per core switch
 ```
 
-5. **Point the DHCP sources at their lease-export files** (produced by
-   `scripts/export-dhcp-leases.ps1` on each Windows DHCP server; make the
-   files reachable, e.g. an SMB mount)
+5. **Register DHCP sources and point them at their lease-export files**
+   (files produced by `scripts/export-dhcp-leases.ps1` on each Windows
+   DHCP server). The daemon supports any number of sources, mixed types:
 
 ```bash
 docker compose exec bidar /usr/local/bin/bidar dhcp-sources list
-docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path <name> /mnt/dhcp/leases-center.json
+# add a Windows source (path set here or later via set-path):
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources add center-dhcp windows --path /mnt/dhcp/leases-center.json
+# add a MikroTik source (password encrypted at rest):
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources add ros-dhcp mikrotik \
+  --host 192.0.2.12 --username admin --password 'CHANGE_ME'
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path center-dhcp /mnt/dhcp/leases-center.json
 ```
+
+   **Paths are container-internal.** `set-path` stores the path as the
+   daemon sees it inside its Linux container. Make the SMB share
+   reachable there by setting `DHCP_SHARE_SRC` in `.env` — on Windows
+   (Docker Desktop) that's a UNC path like `//dc01/dhcp$` or a mapped
+   drive letter; on Linux any host path — compose mounts it read-only at
+   `/mnt/dhcp`, so the source path is `/mnt/dhcp/<file>`.
+   (If your DHCP servers are plain member servers, the WinRM method in
+   `docs/architecture.md` is the future alternative — Phase 1 uses the
+   file export only.)
 
 6. **Start the daemon**
 
