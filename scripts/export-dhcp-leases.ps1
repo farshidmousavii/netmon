@@ -29,10 +29,24 @@ if ($scopes.Count -eq 0) {
     throw 'No DHCP scopes found on this server.'
 }
 
+# Active leases only (the daemon ignores Expired/Offered/Declined rows,
+# so exporting them is pure waste — an old scope can hold tens of
+# thousands of them). Only the five fields the daemon reads are kept,
+# which shrinks the file by an order of magnitude.
 $leases = @()
 foreach ($scope in $scopes) {
     # Without -ClientId/-LeaseId, this returns every lease in the scope.
-    $leases += @(Get-DhcpServerv4Lease -ScopeId $scope.ScopeId)
+    $leases += @(Get-DhcpServerv4Lease -ScopeId $scope.ScopeId |
+        Where-Object { $_.AddressState -eq 'Active' } |
+        ForEach-Object {
+            [pscustomobject]@{
+                AddressId       = $_.AddressId
+                ClientId        = $_.ClientId
+                HostName        = $_.HostName
+                AddressState    = $_.AddressState
+                LeaseExpiryTime = $_.LeaseExpiryTime
+            }
+        })
 }
 
 $export = [pscustomobject]@{
@@ -48,3 +62,4 @@ New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $tmp = "$OutputPath.tmp"
 $export | ConvertTo-Json -Depth 5 | Out-File -FilePath $tmp -Encoding utf8
 Move-Item -Force -Path $tmp -Destination $OutputPath
+
