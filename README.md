@@ -78,18 +78,21 @@ docker compose exec bidar /usr/local/bin/bidar devices list --role=unassigned
 docker compose exec bidar /usr/local/bin/bidar devices set-role <name-or-ip> core # one per core switch
 ```
 
-5. **Register DHCP sources and point them at their lease-export files**
-   (files produced by `scripts/export-dhcp-leases.ps1` on each Windows
-   DHCP server). The daemon supports any number of sources, mixed types:
+5. **Register DHCP sources and point them at their lease-export files**.
+   On each Windows DHCP server, run `scripts/export-dhcp-leases.ps1`
+   (no parameters, no scope IDs — it just writes the leases to
+   `C:\ProgramData\Bidar\dhcp-leases-<SERVER>.json`; schedule it
+   however you like). Make that folder reachable to the daemon, then
+   register the sources — any number, mixed types:
 
 ```bash
 docker compose exec bidar /usr/local/bin/bidar dhcp-sources list
 # add a Windows source (path set here or later via set-path):
-docker compose exec bidar /usr/local/bin/bidar dhcp-sources add center-dhcp windows --path /mnt/dhcp/leases-center.json
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources add center-dhcp windows --path /mnt/dhcp/dhcp-leases-SERVER.json
 # add a MikroTik source (password encrypted at rest):
 docker compose exec bidar /usr/local/bin/bidar dhcp-sources add ros-dhcp mikrotik \
   --host 192.0.2.12 --username admin --password 'CHANGE_ME'
-docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path center-dhcp /mnt/dhcp/leases-center.json
+docker compose exec bidar /usr/local/bin/bidar dhcp-sources set-path center-dhcp /mnt/dhcp/dhcp-leases-SERVER.json
 ```
 
    **Both path forms work in `set-path`.** The daemon reads the path as
