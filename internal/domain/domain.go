@@ -46,25 +46,98 @@ type Observation struct {
 }
 
 // Device is one row of network_devices — the canonical device list shared
-// by the ARP collector (role=core) and Phase 2 polling.
+// by the ARP collector (role=core) and Phase 2 polling. PollIntervalSec
+// drives Phase 2's discovery_jobs enqueue cadence.
 type Device struct {
-	ID             int64
-	Name           string
-	MgmtIP         netip.Addr
-	ProtocolFamily string
-	Role           string
-	Enabled        bool
-	SNMPProfileID  *int64
+	ID              int64
+	Name            string
+	MgmtIP          netip.Addr
+	ProtocolFamily  string
+	Role            string
+	Enabled         bool
+	SNMPProfileID   *int64
+	PollIntervalSec int
 }
 
 // SNMPProfile is one row of snmp_profiles — read-only SNMP credentials,
-// encrypted at rest.
+// encrypted at rest. The v3 fields exist since migration 0001; they are
+// consumed from Phase 2 on via snmp.ConfigFromProfile.
 type SNMPProfile struct {
 	ID                 int64
 	Version            string // v2c | v3
 	CommunityEncrypted []byte
+	V3Username         string
+	V3AuthProtocol     string
+	V3AuthKeyEncrypted []byte
+	V3PrivProtocol     string
+	V3PrivKeyEncrypted []byte
 	TimeoutMS          int
 	Retries            int
+}
+
+// DeviceInterface is one row of device_interfaces — an interface seen on a
+// polled device. PortRole is deliberately absent here: it is Phase 3's
+// correlation output, never written by the polling providers.
+type DeviceInterface struct {
+	IfIndex      int
+	IfName       *string
+	IfDesc       *string
+	MAC          *net.HardwareAddr
+	AdminStatus  string // text form of ifAdminStatus ("up"/"down"/...)
+	OperStatus   string
+	PVID         *int32
+	LastChangeAt *time.Time
+}
+
+// DeviceVLAN is one row of device_vlans — a VLAN announced by a device.
+type DeviceVLAN struct {
+	VlanNumber int32
+	Name       *string
+}
+
+// MACTableEntry is one MAC-table observation for SyncDeviceMACTable.
+// InterfaceID links to device_interfaces (nil when the port is unknown);
+// VLANNumber is nil for VLAN-unaware tables.
+type MACTableEntry struct {
+	InterfaceID *int64
+	VLANNumber  *int32
+	MAC         net.HardwareAddr
+}
+
+// Neighbor is one LLDP/CDP neighbor link for ReplaceDeviceNeighbors.
+type Neighbor struct {
+	LocalInterfaceID *int64
+	Protocol         string // lldp | cdp
+	RemoteSystemName *string
+	RemotePortID     *string
+	RemoteMgmtIP     *netip.Addr
+}
+
+// MikrotikEvidence is one mikrotik_leases row — RouterOS-sourced evidence
+// (dhcp_lease | arp | wireless_reg) keyed to the polled device.
+type MikrotikEvidence struct {
+	MAC       net.HardwareAddr
+	IP        *netip.Addr
+	Hostname  *string
+	Interface *string
+}
+
+// DiscoveryJob is one row of discovery_jobs — the Postgres-backed poll
+// queue. All state lives in the table so the worker pool is resumable
+// across restarts.
+type DiscoveryJob struct {
+	ID             int64
+	Provider       string
+	TargetType     string
+	TargetID       *int64
+	Status         string // queued | running | succeeded | failed
+	Attempt        int
+	LeaseOwner     *string
+	LeaseExpiresAt *time.Time
+	ScheduledAt    time.Time
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+	ErrorMessage   *string
 }
 
 // DHCPSource is one row of dhcp_sources — a lease evidence source, by
