@@ -54,9 +54,10 @@ func TestMigrateSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrateSchema: %v", err)
 	}
-	// 0001_init + 0002_network_devices_mgmt_ip_unique.
-	if version != 2 {
-		t.Errorf("schema version = %d, want 2", version)
+	// 0001_init + 0002_network_devices_mgmt_ip_unique
+	// + 0003_phase2_inventory + 0004_discovery_jobs.
+	if version != 4 {
+		t.Errorf("schema version = %d, want 4", version)
 	}
 }
 
