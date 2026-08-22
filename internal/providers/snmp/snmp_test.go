@@ -35,6 +35,10 @@ type fakeClient struct {
 	getErr    error
 	fdb       map[string][]snmp.Varbind // generic walk responses (MAC tables)
 	fdbErr    error                     // fails every generic walk
+	lldpRows  []snmp.TableRow
+	lldpErr   error
+	cdpRows   []snmp.TableRow
+	cdpErr    error
 	closed    bool
 }
 
@@ -63,7 +67,14 @@ func (f *fakeClient) WalkTable(_ context.Context, baseOID string) ([]snmp.Varbin
 }
 
 func (f *fakeClient) WalkTableColumns(_ context.Context, cols ...string) ([]snmp.TableRow, error) {
-	return f.columns, nil
+	switch cols[0] {
+	case lldpCols[0]:
+		return f.lldpRows, f.lldpErr
+	case cdpCols[0]:
+		return f.cdpRows, f.cdpErr
+	default:
+		return f.columns, nil // interface table
+	}
 }
 
 func (f *fakeClient) Close() error { f.closed = true; return nil }
@@ -481,5 +492,142 @@ func TestRunAllMACSourcesFail(t *testing.T) {
 	}
 	if failures != 1 {
 		t.Errorf("consecutive_failures = %d, want 1", failures)
+	}
+}
+
+func TestRunNeighborsLLDPAndCDP(t *testing.T) {
+	c := fixtureClient()
+	// LLDP neighbor on local port 2 (ifIndex 2): chassis ID carries the
+	// management address as a networkAddress (subtype 5, family 1 = IPv4).
+	c.lldpRows = []snmp.TableRow{{
+		Index: append([]int{0, 2}, macSuffix("aa:bb:cc:dd:ee:01")...),
+		Values: []any{
+			5,                       // chassisIdSubtype networkAddress
+			[]byte{1, 192, 0, 2, 9}, // afi IPv4 + 192.0.2.9
+			octet("Gi0/1"),          // remote port id
+			octet("core-sw-01"),     // remote system name
+		},
+	}}
+	// CDP neighbor on ifIndex 1.
+	c.cdpRows = []snmp.TableRow{{
+		Index: []int{1, 1},
+		Values: []any{
+			octet("uplink-core"),               // cdpCacheDeviceId
+			octet("Te1/1/1"),                   // cdpCacheDevicePort
+			[]byte{0xCC, 1, 0, 4, 10, 0, 0, 1}, // NABBPE: IPv4 10.0.0.1
+		},
+	}}
+	h := newHarness(t, c)
+
+	res, err := h.p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// 3 interfaces + 3 VLANs + 0 MACs + 2 neighbors.
+	if res.ItemsFound != 8 {
+		t.Errorf("ItemsFound = %d, want 8", res.ItemsFound)
+	}
+
+	ctx := context.Background()
+	type nbr struct {
+		protocol, sysName, portID, mgmtIP string
+		localIf                           int
+	}
+	got := map[string]nbr{}
+	rows, err := h.pool.Query(ctx, `
+		SELECT n.protocol, i.if_index,
+		       coalesce(n.remote_system_name, ''), coalesce(n.remote_port_id, ''),
+		       coalesce(n.remote_mgmt_ip::text, '')
+		FROM neighbors_current n
+		LEFT JOIN device_interfaces i ON i.id = n.local_interface_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n nbr
+		if err := rows.Scan(&n.protocol, &n.localIf, &n.sysName, &n.portID, &n.mgmtIP); err != nil {
+			t.Fatal(err)
+		}
+		got[n.protocol] = n
+	}
+	if len(got) != 2 {
+		t.Fatalf("neighbors = %v, want lldp+cdp", got)
+	}
+	l := got["lldp"]
+	if l.localIf != 2 || l.sysName != "core-sw-01" || l.portID != "Gi0/1" || l.mgmtIP != "192.0.2.9/32" {
+		t.Errorf("lldp neighbor = %+v", l)
+	}
+	d := got["cdp"]
+	if d.localIf != 1 || d.sysName != "uplink-core" || d.portID != "Te1/1/1" || d.mgmtIP != "10.0.0.1/32" {
+		t.Errorf("cdp neighbor = %+v", d)
+	}
+}
+
+func TestRunOneNeighborSourceFailsKeepsOther(t *testing.T) {
+	c := fixtureClient()
+	c.lldpErr = targetError("no such object")
+	c.cdpRows = []snmp.TableRow{{
+		Index:  []int{1, 1},
+		Values: []any{octet("uplink-core"), octet("Te1/1/1"), []byte{0xCC, 1, 0, 4, 10, 0, 0, 1}},
+	}}
+	h := newHarness(t, c)
+
+	if _, err := h.p.Run(context.Background()); err != nil {
+		t.Fatalf("Run should succeed with one working source: %v", err)
+	}
+	var count int
+	var proto string
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*), min(protocol) FROM neighbors_current`).Scan(&count, &proto); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || proto != "cdp" {
+		t.Errorf("neighbors = %d/%s, want 1/cdp (lldp failed, cdp kept)", count, proto)
+	}
+}
+
+func TestRunBothNeighborWalksFail(t *testing.T) {
+	c := fixtureClient()
+	c.lldpErr = targetError("no such object")
+	c.cdpErr = targetError("walk timeout")
+	h := newHarness(t, c)
+
+	_, err := h.p.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error when both neighbor walks fail")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("all 1 devices failed")) {
+		t.Errorf("err = %v, want all-devices-failed message", err)
+	}
+	var failures int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT consecutive_failures FROM network_devices WHERE name = 'fixture-sw'`).Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 1 {
+		t.Errorf("consecutive_failures = %d, want 1", failures)
+	}
+}
+
+func TestParseNeighborAddresses(t *testing.T) {
+	// CDP NABBPE: non-IP protocol prefix is skipped evidence, not an error.
+	if got := parseCDPAddress([]byte{0x81, 1, 0, 4, 1, 2, 3, 4}); got != nil {
+		t.Errorf("non-IP cdp address parsed as %v", got)
+	}
+	if got := parseCDPAddress([]byte{0xCC, 1, 0}); got != nil {
+		t.Errorf("truncated cdp address parsed as %v", got)
+	}
+	ip := parseCDPAddress([]byte{0xCC, 1, 0, 4, 10, 1, 2, 3})
+	if ip == nil || ip.String() != "10.1.2.3" {
+		t.Errorf("cdp address = %v", ip)
+	}
+	// LLDP IANA form: family 2 = IPv6.
+	ip6 := parseIANAAddress(append([]byte{2}, bytes.Repeat([]byte{0x20}, 16)...))
+	if ip6 == nil || ip6.String() != "2020:2020:2020:2020:2020:2020:2020:2020" {
+		t.Errorf("iana ipv6 = %v", ip6)
+	}
+	if parseIANAAddress([]byte{9, 1, 2, 3, 4}) != nil {
+		t.Error("unknown address family should yield nil")
 	}
 }

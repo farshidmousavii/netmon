@@ -209,10 +209,51 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 	}
 	items += n
 
+	// Neighbors: LLDP + CDP, replace-per-device.
+	n, err = p.pollNeighbors(ctx, dev, client, ifaceIDs, now)
+	if err != nil {
+		return p.pollFailed(ctx, dev, now, err)
+	}
+	items += n
+
 	if err := p.store.UpdateDevicePollHealth(ctx, dev.ID, nil, now); err != nil {
 		return items, fmt.Errorf("record poll health: %w", err)
 	}
 	return items, nil
+}
+
+// pollNeighbors collects LLDP and CDP neighbor links into
+// neighbors_current (replace-per-device). The two protocols are
+// independent best-effort sources; only when BOTH walks fail does the
+// poll fail — replacing the previous snapshot with an empty set because
+// one walk hiccupped would be worse than keeping it.
+func (p *Provider) pollNeighbors(ctx context.Context, dev domain.Device, c snmpClient, ifaceIDs map[int]int64, now time.Time) (int, error) {
+	var neighbors []domain.Neighbor
+	sources := 0
+
+	lldp, err := collectLLDP(ctx, c, ifaceIDs)
+	if err != nil {
+		p.logger.Warn("snmp: lldp walk failed", "device_id", dev.ID, "err", err)
+	} else {
+		neighbors = append(neighbors, lldp...)
+		sources++
+	}
+
+	cdp, err := collectCDP(ctx, c, ifaceIDs)
+	if err != nil {
+		p.logger.Warn("snmp: cdp walk failed", "device_id", dev.ID, "err", err)
+	} else {
+		neighbors = append(neighbors, cdp...)
+		sources++
+	}
+
+	if sources == 0 {
+		return 0, fmt.Errorf("lldp and cdp neighbor walks both failed")
+	}
+	if err := p.store.ReplaceDeviceNeighbors(ctx, dev.ID, neighbors, now); err != nil {
+		return 0, fmt.Errorf("store neighbors: %w", err)
+	}
+	return len(neighbors), nil
 }
 
 // pollMACs collects the forwarding database. Primary path is BRIDGE-MIB

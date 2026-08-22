@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strings"
@@ -345,4 +346,158 @@ func collectQbridge(ctx context.Context, c snmpClient, ifaceIDs map[int]int64) (
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// Neighbor-discovery OIDs.
+const (
+	oidLldpRemChassisSubtype = "1.0.8802.1.1.2.1.4.1.1.3" // lldpRemChassisIdSubtype
+	oidLldpRemChassisId      = "1.0.8802.1.1.2.1.4.1.1.4" // lldpRemChassisId
+	oidLldpRemPortId         = "1.0.8802.1.1.2.1.4.1.1.6" // lldpRemPortId
+	oidLldpRemSysName        = "1.0.8802.1.1.2.1.4.1.1.7" // lldpRemSysName
+
+	oidCdpCacheDeviceId   = "1.3.6.1.4.1.9.9.23.1.2.1.1.3" // cdpCacheDeviceId
+	oidCdpCacheDevicePort = "1.3.6.1.4.1.9.9.23.1.2.1.1.4" // cdpCacheDevicePort
+	oidCdpCacheAddress    = "1.3.6.1.4.1.9.9.23.1.2.1.1.6" // cdpCacheAddress
+)
+
+// Column orders buildLLDP / buildCDP expect.
+var (
+	lldpCols = []string{oidLldpRemChassisSubtype, oidLldpRemChassisId, oidLldpRemPortId, oidLldpRemSysName}
+	cdpCols  = []string{oidCdpCacheDeviceId, oidCdpCacheDevicePort, oidCdpCacheAddress}
+)
+
+const (
+	lldpColChassisSubtype = iota
+	lldpColChassisId
+	lldpColPortID
+	lldpColSysName
+)
+
+const (
+	cdpColDeviceID = iota
+	cdpColDevicePort
+	cdpColAddress
+)
+
+func colVal(r snmp.TableRow, col int) any {
+	if col >= len(r.Values) {
+		return nil
+	}
+	return r.Values[col]
+}
+
+// collectLLDP reads the LLDP remote-neighbors table. The remote
+// management address is not a column of its own: when the chassis ID
+// subtype is networkAddress(5), the chassis ID octets carry it as
+// [address-family, address] — extracted here; otherwise it stays NULL.
+func collectLLDP(ctx context.Context, c snmpClient, ifaceIDs map[int]int64) ([]domain.Neighbor, error) {
+	rows, err := c.WalkTableColumns(ctx, lldpCols...)
+	if err != nil {
+		return nil, fmt.Errorf("walk lldpRemTable: %w", err)
+	}
+
+	out := make([]domain.Neighbor, 0, len(rows))
+	for _, r := range rows {
+		// INDEX { timeMark, localPortNum, destMac(6) }.
+		if len(r.Index) < 8 {
+			continue
+		}
+		localPort := r.Index[1]
+
+		n := domain.Neighbor{Protocol: "lldp"}
+		if id, ok := ifaceIDs[localPort]; ok {
+			n.LocalInterfaceID = &id
+		}
+		if s := octetStringPtr(colVal(r, lldpColPortID)); s != nil {
+			n.RemotePortID = s
+		}
+		if s := octetStringPtr(colVal(r, lldpColSysName)); s != nil {
+			n.RemoteSystemName = s
+		}
+		if st, ok := intValue(colVal(r, lldpColChassisSubtype)); ok && st == 5 {
+			if b, ok := colVal(r, lldpColChassisId).([]byte); ok {
+				n.RemoteMgmtIP = parseIANAAddress(b)
+			}
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// parseIANAAddress decodes an IANA AddressFamilyNumbers-prefixed address
+// (LLDP networkAddress form): [family, address...]. Family 1 = IPv4,
+// 2 = IPv6.
+func parseIANAAddress(b []byte) *netip.Addr {
+	if len(b) < 5 {
+		return nil
+	}
+	var lo, hi int
+	switch b[0] {
+	case 1:
+		lo, hi = 1, 5
+	case 2:
+		if len(b) < 17 {
+			return nil
+		}
+		lo, hi = 1, 17
+	default:
+		return nil
+	}
+	ip, ok := netip.AddrFromSlice(b[lo:hi])
+	if !ok {
+		return nil
+	}
+	return &ip
+}
+
+// collectCDP reads Cisco's CDP cache. cdpCacheAddress uses the NABBPE
+// layout ([protocol-type, protocol-len, address-len(2), address]); the
+// first entry is extracted when it is IPv4 (type 0xCC).
+func collectCDP(ctx context.Context, c snmpClient, ifaceIDs map[int]int64) ([]domain.Neighbor, error) {
+	rows, err := c.WalkTableColumns(ctx, cdpCols...)
+	if err != nil {
+		return nil, fmt.Errorf("walk cdpCacheTable: %w", err)
+	}
+
+	out := make([]domain.Neighbor, 0, len(rows))
+	for _, r := range rows {
+		// INDEX { cdpCacheIfIndex, cdpCacheDeviceIndex }.
+		if len(r.Index) < 2 {
+			continue
+		}
+		localIf := r.Index[0]
+
+		n := domain.Neighbor{Protocol: "cdp"}
+		if id, ok := ifaceIDs[localIf]; ok {
+			n.LocalInterfaceID = &id
+		}
+		if s := octetStringPtr(colVal(r, cdpColDeviceID)); s != nil {
+			n.RemoteSystemName = s
+		}
+		if s := octetStringPtr(colVal(r, cdpColDevicePort)); s != nil {
+			n.RemotePortID = s
+		}
+		if b, ok := colVal(r, cdpColAddress).([]byte); ok {
+			n.RemoteMgmtIP = parseCDPAddress(b)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// parseCDPAddress extracts the first IPv4 entry from cdpCacheAddress's
+// NABBPE octets: [0xCC, protoLen, addrLen(2 big-endian), addr...].
+func parseCDPAddress(b []byte) *netip.Addr {
+	if len(b) < 8 || b[0] != 0xCC {
+		return nil
+	}
+	addrLen := int(b[2])<<8 | int(b[3])
+	if addrLen != 4 || len(b) < 4+addrLen {
+		return nil
+	}
+	ip, ok := netip.AddrFromSlice(b[4 : 4+addrLen])
+	if !ok {
+		return nil
+	}
+	return &ip
 }
