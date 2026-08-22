@@ -57,18 +57,10 @@ services:
       BIDAR_ARP_INTERVAL: ${BIDAR_ARP_INTERVAL:-5m}
       BIDAR_DHCP_INTERVAL: ${BIDAR_DHCP_INTERVAL:-5m}
       BIDAR_ICMP_INTERVAL: ${BIDAR_ICMP_INTERVAL:-5m}
-      BIDAR_DHCP_STALENESS: ${BIDAR_DHCP_STALENESS:-24h}
-      BIDAR_DHCP_SHARE_SRC: ${DHCP_SHARE_SRC:-./dhcp}
     # icmpsweep execs the system ping binary (raw ICMP socket): the
     # container runs nonroot (Phase 0 Dockerfile), so it needs NET_RAW.
     cap_add:
       - NET_RAW
-    # DHCP lease-export share, mounted read-only at /mnt/dhcp inside the
-    # container — set DHCP_SHARE_SRC in .env (Windows/Docker Desktop:
-    # //server/share or a drive letter; Linux: any host path; default
-    # ./dhcp). dhcp-sources set-path then uses /mnt/dhcp/<file>.
-    volumes:
-      - ${DHCP_SHARE_SRC:-./dhcp}:/mnt/dhcp:ro
     depends_on:
       postgres:
         condition: service_healthy

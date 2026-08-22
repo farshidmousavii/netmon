@@ -1,6 +1,11 @@
 // Package icmpsweep is the Phase 1 liveness provider: it pings every
 // enabled subnet's host range and writes host_observations (source='icmp').
 //
+// On a successful ping it does a best-effort reverse-DNS (PTR) lookup and
+// records the hostname on the observation when available; a failed lookup
+// is just missing evidence, never a provider error (relies on the DHCP
+// server's dynamic DNS registration, already enabled in this environment).
+//
 // ICMP carries no identity of its own — no MAC, no hostname, no VLAN — so
 // it never CREATES hosts. An IP that answers ping updates an existing
 // host's liveness (matched by IP) or records an unlinked observation for
@@ -18,9 +23,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,12 +60,16 @@ type Config struct {
 // pinger reports whether one IP answered a ping.
 type pinger func(ctx context.Context, ip netip.Addr) bool
 
+// lookupAddr does reverse DNS; injectable for tests.
+type lookupAddr func(ctx context.Context, addr string) ([]string, error)
+
 // Provider implements providers.Provider for the ICMP sweep.
 type Provider struct {
 	store  *store.Store
 	logger *slog.Logger
 	cfg    Config
 	ping   pinger
+	lookup lookupAddr
 
 	health providers.Health
 }
@@ -72,8 +83,12 @@ func New(cfg Config, st *store.Store, logger *slog.Logger) (*Provider, error) {
 	return p, nil
 }
 
-// newWithPinger is New with an injectable pinger for tests.
+// newWithPinger is New with an injectable pinger (and lookup) for tests.
 func newWithPinger(cfg Config, st *store.Store, logger *slog.Logger, ping pinger) (*Provider, error) {
+	return newWithLookup(cfg, st, logger, ping, nil)
+}
+
+func newWithLookup(cfg Config, st *store.Store, logger *slog.Logger, ping pinger, lookup lookupAddr) (*Provider, error) {
 	if st == nil {
 		return nil, fmt.Errorf("icmpsweep: store is required")
 	}
@@ -94,6 +109,13 @@ func newWithPinger(cfg Config, st *store.Store, logger *slog.Logger, ping pinger
 		ping = p.realPing
 	}
 	p.ping = ping
+	if lookup == nil {
+		lookup = func(ctx context.Context, addr string) ([]string, error) {
+			var r net.Resolver
+			return r.LookupAddr(ctx, addr)
+		}
+	}
+	p.lookup = lookup
 	return p, nil
 }
 
@@ -197,22 +219,36 @@ func (p *Provider) sweepSubnet(ctx context.Context, sn domain.Subnet, now time.T
 }
 
 // reconcilePing links a live IP to an existing host (never creates one)
-// and appends the observation.
+// and appends the observation. On success it does a best-effort PTR
+// lookup and records the hostname when available.
 func (p *Provider) reconcilePing(ctx context.Context, ip netip.Addr, detail []byte, now time.Time) error {
 	ipCopy := ip
+
+	// Best-effort reverse DNS (depends on DHCP server's dynamic DNS
+	// registration; already enabled in this environment). A failed lookup
+	// is just missing evidence.
+	var ptrHostname *string
+	if names, err := p.lookupAddrWithTimeout(ctx, ip); err == nil && len(names) > 0 {
+		h := strings.TrimSuffix(names[0], ".")
+		if h != "" {
+			ptrHostname = &h
+		}
+	}
 
 	host, err := reconcile.Existing(ctx, p.store, &ipCopy)
 	if err != nil {
 		return err
 	}
 	if host == nil {
-		return reconcile.UnlinkedObservation(ctx, p.store, "icmp", &ipCopy, detail, now)
+		return reconcile.UnlinkedObservation(ctx, p.store, "icmp", &ipCopy, ptrHostname, detail, now)
 	}
 
-	if err := p.store.UpdateHostFromPresence(ctx, host.ID, nil, &ipCopy, nil, nil, nil, now); err != nil {
+	// Pass PTR hostname to fill an empty host.hostname, but never
+	// overwrite an AD-assigned name (COALESCE in the store query).
+	if err := p.store.UpdateHostFromPresence(ctx, host.ID, ptrHostname, &ipCopy, nil, nil, nil, now); err != nil {
 		return err
 	}
-	return reconcile.Observation(ctx, p.store, host.ID, "icmp", nil, &ipCopy, nil, nil, detail, now)
+	return reconcile.Observation(ctx, p.store, host.ID, "icmp", ptrHostname, &ipCopy, nil, nil, detail, now)
 }
 
 // hostCount is the number of pingable addresses in a prefix (network and
@@ -287,6 +323,12 @@ func (p *Provider) realPing(ctx context.Context, ip netip.Addr) bool {
 		return false
 	}
 	return true
+}
+
+func (p *Provider) lookupAddrWithTimeout(ctx context.Context, ip netip.Addr) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return p.lookup(ctx, ip.String())
 }
 
 func (p *Provider) fail(err error) {

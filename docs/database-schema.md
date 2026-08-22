@@ -110,14 +110,14 @@ The unique constraint on `mgmt_ip` was added in migration `0002` (Phase 0, disco
 `protocol_family` replaces an earlier, more ambiguous `device_type` field — it exists purely to answer "which provider talks to this device," separate from `vendor` (free-text, e.g. populated later from SNMP `sysObjectID` detection) and `function` (informational only). `bidar import-devices` maps the existing config's `vendor` field (`cisco`/`mikrotik`) to `protocol_family` (`cisco_snmp`/`mikrotik_routeros`) and its `type` field (`router`/`switch`/`firewall`) to `function` — but never sets `role`; that stays `unassigned` until an operator explicitly assigns `core`/`access`, so an import can never silently leave the ARP collector polling nothing.
 
 ### dhcp_sources
-A DHCP lease evidence source. Do not assume one DHCP server — list every one, by type.
+A DHCP lease evidence source. `mikrotik` is the only implemented type in Phase 1 — `windows` and `cisco` are recognized but deliberately unimplemented (a clean error if configured, never a silent no-op); see `architecture.md` §Phase 1 and §Backlog for why. `isc`/`other` are accepted placeholders for future use, not built against.
 
 ```sql
 CREATE TABLE dhcp_sources (
     id                 BIGSERIAL PRIMARY KEY,
     name               text NOT NULL,
-    source_type        text NOT NULL,   -- windows | mikrotik | isc | other
-    connection_config  jsonb NOT NULL,  -- type-specific: host, auth method, path, etc.
+    source_type        text NOT NULL,   -- mikrotik (implemented) | windows | cisco (unimplemented) | isc | other (placeholders)
+    connection_config  jsonb NOT NULL,  -- type-specific: host, auth method, etc.
     credential_enc     bytea,           -- encrypted secret if the type needs one
     enabled            boolean NOT NULL DEFAULT true,
     last_poll_at       timestamptz,

@@ -1,11 +1,10 @@
 package store
 
 // Integration tests for the admin-CLI queries (devices list/set-role,
-// dhcp-sources list/set-path). Gated on BIDAR_TEST_DATABASE_URL.
+// dhcp-sources list/add). Gated on BIDAR_TEST_DATABASE_URL.
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -106,73 +105,20 @@ func TestSetDeviceRole(t *testing.T) {
 	}
 }
 
-func TestSetDHCPSourcePath(t *testing.T) {
-	st := newAdminStore(t)
-	ctx := context.Background()
-
-	seedSource := func(name, sourceType, config string) {
-		t.Helper()
-		if _, err := st.pool.Exec(ctx, `
-			INSERT INTO dhcp_sources (name, source_type, connection_config)
-			VALUES ($1, $2, $3::jsonb)`, name, sourceType, config); err != nil {
-			t.Fatalf("seed source %s: %v", name, err)
-		}
-	}
-	seedSource("win-1", "windows", `{"host": "192.0.2.11"}`)
-	seedSource("ros-1", "mikrotik", `{"host": "192.0.2.12", "username": "admin"}`)
-
-	// Set path on windows: host key must survive (jsonb merge).
-	if _, err := st.SetDHCPSourcePath(ctx, "win-1", "/mnt/dhcp/leases.json"); err != nil {
-		t.Fatalf("set path: %v", err)
-	}
-	sources, err := st.ListAllDHCPSources(ctx)
-	if err != nil {
-		t.Fatalf("ListAllDHCPSources: %v", err)
-	}
-	var winCfg map[string]any
-	for _, src := range sources {
-		if src.Name == "win-1" {
-			if err := json.Unmarshal(src.ConnectionConfig, &winCfg); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			break
-		}
-	}
-	if winCfg == nil {
-		t.Fatal("win-1 not found in list")
-	}
-	if winCfg["path"] != "/mnt/dhcp/leases.json" {
-		t.Errorf("path = %v, want /mnt/dhcp/leases.json", winCfg["path"])
-	}
-	if winCfg["host"] != "192.0.2.11" {
-		t.Errorf("host lost in merge: %v", winCfg["host"])
-	}
-
-	// Non-windows source: clear error, not a silent no-op.
-	if _, err := st.SetDHCPSourcePath(ctx, "ros-1", "/tmp/x.json"); err == nil {
-		t.Error("expected error for non-windows source")
-	}
-
-	// Unknown source.
-	if _, err := st.SetDHCPSourcePath(ctx, "ghost", "/tmp/x.json"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("unknown source: err = %v, want ErrNotFound", err)
-	}
-}
-
 func TestAddDHCPSource(t *testing.T) {
 	st := newAdminStore(t)
 	ctx := context.Background()
 
-	id, err := st.AddDHCPSource(ctx, "win-2", "windows", []byte(`{"path": "/mnt/dhcp/a.json"}`), nil)
+	id, err := st.AddDHCPSource(ctx, "src-1", "isc", []byte(`{}`), nil)
 	if err != nil {
-		t.Fatalf("add windows source: %v", err)
+		t.Fatalf("add isc source: %v", err)
 	}
 	if id == 0 {
 		t.Error("expected a real id")
 	}
 
 	// Duplicate name: clear error.
-	if _, err := st.AddDHCPSource(ctx, "win-2", "windows", []byte(`{}`), nil); err == nil {
+	if _, err := st.AddDHCPSource(ctx, "src-1", "isc", []byte(`{}`), nil); err == nil {
 		t.Error("expected error for duplicate name")
 	}
 
@@ -187,7 +133,7 @@ func TestAddDHCPSource(t *testing.T) {
 		t.Error("expected error for invalid source type")
 	}
 	// Empty name rejected.
-	if _, err := st.AddDHCPSource(ctx, "  ", "windows", []byte(`{}`), nil); err == nil {
+	if _, err := st.AddDHCPSource(ctx, "  ", "isc", []byte(`{}`), nil); err == nil {
 		t.Error("expected error for empty name")
 	}
 

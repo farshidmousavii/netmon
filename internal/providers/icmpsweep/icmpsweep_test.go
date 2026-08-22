@@ -28,6 +28,21 @@ type icmpHarness struct {
 	ping     *fakePinger
 }
 
+type fakeLookup struct {
+	addrs map[string]string // ip.String() -> hostname
+	err   error
+}
+
+func (f *fakeLookup) lookup(ctx context.Context, addr string) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if h, ok := f.addrs[addr]; ok {
+		return []string{h}, nil
+	}
+	return nil, nil
+}
+
 type fakePinger struct {
 	alive     map[netip.Addr]bool
 	mu        sync.Mutex
@@ -62,10 +77,17 @@ func (f *fakePinger) ping(ctx context.Context, ip netip.Addr) bool {
 }
 
 func newICMPHarness(t *testing.T, cfg Config, alive map[netip.Addr]bool) *icmpHarness {
+	return newICMPHarnessWithLookup(t, cfg, alive, nil)
+}
+
+func newICMPHarnessWithLookup(t *testing.T, cfg Config, alive map[netip.Addr]bool, lookup lookupAddr) *icmpHarness {
 	t.Helper()
 	pool := testdb.Open(t, testdb.ScratchURL(t, testdb.BaseURL(t)))
 	ping := &fakePinger{alive: alive}
-	p, err := newWithPinger(cfg, store.New(pool), slog.Default(), ping.ping)
+	if lookup == nil {
+		lookup = (&fakeLookup{}).lookup
+	}
+	p, err := newWithLookup(cfg, store.New(pool), slog.Default(), ping.ping, lookup)
 	if err != nil {
 		t.Fatalf("newWithPinger: %v", err)
 	}
@@ -260,6 +282,46 @@ func TestRealPingLoopback(t *testing.T) {
 	}
 	if res.ItemsFound != 1 {
 		t.Errorf("ItemsFound = %d, want 1 (loopback answers ping)", res.ItemsFound)
+	}
+}
+
+func TestPTREnrichment(t *testing.T) {
+	alive := map[netip.Addr]bool{netip.MustParseAddr("192.0.2.1"): true}
+	lookup := (&fakeLookup{addrs: map[string]string{"192.0.2.1": "host.example.com."}}).lookup
+	h := newICMPHarnessWithLookup(t, Config{}, alive, lookup)
+	h.seedSubnet(t, "192.0.2.0/30", true)
+
+	res, err := h.provider.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ItemsFound != 1 {
+		t.Errorf("ItemsFound = %d, want 1", res.ItemsFound)
+	}
+	// The observation for 192.0.2.1 should have hostname from PTR
+	var hostname *string
+	err = h.pool.QueryRow(context.Background(),
+		`SELECT hostname FROM host_observations WHERE source='icmp' AND ip = '192.0.2.1'::inet`).Scan(&hostname)
+	if err != nil {
+		t.Fatalf("query observation hostname: %v", err)
+	}
+	if hostname == nil || *hostname != "host.example.com" {
+		t.Errorf("PTR hostname = %v, want host.example.com", hostname)
+	}
+	// Failed PTR (no entry) should still succeed but with no hostname
+	alive2 := map[netip.Addr]bool{netip.MustParseAddr("192.0.2.6"): true}
+	h2 := newICMPHarnessWithLookup(t, Config{}, alive2, (&fakeLookup{}).lookup)
+	h2.seedSubnet(t, "192.0.2.4/30", true)
+	if _, err := h2.provider.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var hostname2 *string
+	if err := h2.pool.QueryRow(context.Background(),
+		`SELECT hostname FROM host_observations WHERE ip = '192.0.2.6'::inet`).Scan(&hostname2); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if hostname2 != nil {
+		t.Errorf("PTR hostname should be nil on failed lookup, got %v", *hostname2)
 	}
 }
 

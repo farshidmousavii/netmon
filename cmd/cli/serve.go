@@ -36,7 +36,6 @@ Environment (the daemon is env-configured, not --config):
   BIDAR_ARP_INTERVAL    ARP poll cadence (default 5m)
   BIDAR_DHCP_INTERVAL   DHCP poll cadence (default 5m)
   BIDAR_ICMP_INTERVAL   ICMP sweep cadence (default 5m)
-  BIDAR_DHCP_STALENESS  max age of Windows lease exports (default 24h)
 
 The schema must already be migrated with ` + "`bidar migrate`" + ` — serve
 never applies migrations itself and fails clearly if the schema is

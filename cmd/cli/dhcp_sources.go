@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/domain"
-	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/farshidmousavii/bidar/internal/logger"
 	"github.com/farshidmousavii/bidar/internal/store"
 	"github.com/spf13/cobra"
@@ -33,38 +31,21 @@ var dhcpSourcesListCmd = &cobra.Command{
 	Run:   runDHCPSourcesList,
 }
 
-var dhcpSourcesSetPathCmd = &cobra.Command{
-	Use:   "set-path <name> <path>",
-	Short: "Set a windows source's lease-export file path",
-	Long: `Set connection_config.path for a source_type = 'windows' source:
-the JSON lease-export file produced by scripts/export-dhcp-leases.ps1 and
-made reachable to the daemon (e.g. an SMB mount). Other keys in
-connection_config are preserved.
-
-Takes effect on the next scheduled poll cycle — no daemon restart needed.`,
-	Args: cobra.ExactArgs(2),
-	Run:  runDHCPSourcesSetPath,
-}
-
-func init() {
-	rootCmd.AddCommand(dhcpSourcesCmd)
-	dhcpSourcesCmd.AddCommand(dhcpSourcesListCmd)
-	dhcpSourcesCmd.AddCommand(dhcpSourcesSetPathCmd)
-}
-
 var dhcpSourcesAddCmd = &cobra.Command{
-	Use:   "add <name> <windows|mikrotik|isc|other>",
+	Use:   "add <name> <mikrotik|isc|other>",
 	Short: "Add a DHCP source",
 	Long: `Add a DHCP lease evidence source.
 
-  windows:  --path <file>  lease-export file (as seen inside the daemon
-                           container; mount the SMB share into the
-                           container first, e.g. at /mnt/dhcp). Optional
-                           here — set later with set-path.
   mikrotik: --host <addr> --username <user> --password <pass>
                            RouterOS API credentials (password is
                            encrypted at rest with BIDAR_MASTER_KEY).
-  isc/other: no extra fields (not collected in Phase 1).
+  isc/other: no extra fields (accepted placeholders, not collected
+                           in Phase 1).
+
+windows and cisco are recognized schema types but deliberately
+unimplemented in Phase 1 (only mikrotik is) — this command rejects them
+with a clear error rather than creating a source that can never poll.
+See docs/architecture.md §Phase 1 for the reasoning.
 
 The daemon picks the new source up on its next poll cycle — no restart.`,
 	Args: cobra.ExactArgs(2),
@@ -74,13 +55,11 @@ The daemon picks the new source up on its next poll cycle — no restart.`,
 func init() {
 	rootCmd.AddCommand(dhcpSourcesCmd)
 	dhcpSourcesCmd.AddCommand(dhcpSourcesListCmd)
-	dhcpSourcesCmd.AddCommand(dhcpSourcesSetPathCmd)
 	dhcpSourcesCmd.AddCommand(dhcpSourcesAddCmd)
 
 	dhcpSourcesAddCmd.Flags().String("host", "", "RouterOS API host (mikrotik)")
 	dhcpSourcesAddCmd.Flags().String("username", "", "RouterOS API username (mikrotik)")
 	dhcpSourcesAddCmd.Flags().String("password", "", "RouterOS API password (mikrotik; encrypted at rest)")
-	dhcpSourcesAddCmd.Flags().String("path", "", "lease-export file path (windows)")
 }
 
 func runDHCPSourcesAdd(cmd *cobra.Command, args []string) {
@@ -91,20 +70,18 @@ func runDHCPSourcesAdd(cmd *cobra.Command, args []string) {
 	name := strings.TrimSpace(args[0])
 	sourceType := strings.TrimSpace(args[1])
 	if !store.ValidDHCPSourceTypes[sourceType] {
-		log.Fatalf("invalid source type %q (use windows, mikrotik, isc or other)", sourceType)
+		log.Fatalf("invalid source type %q (use mikrotik, isc or other)", sourceType)
+	}
+	if sourceType == "windows" || sourceType == "cisco" {
+		log.Fatalf("source_type %q is not implemented in Phase 1 (only mikrotik is supported); see docs/architecture.md", sourceType)
 	}
 
 	host, _ := cmd.Flags().GetString("host")
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
-	path, _ := cmd.Flags().GetString("path")
 
 	cfg := map[string]any{}
 	switch sourceType {
-	case "windows":
-		if path != "" {
-			cfg["path"] = path
-		}
 	case "mikrotik":
 		if host == "" || username == "" || password == "" {
 			log.Fatal("mikrotik sources need --host, --username and --password")
@@ -189,11 +166,6 @@ func dhcpStatus(src domain.DHCPSource) string {
 		return "unparsable config"
 	}
 	switch src.SourceType {
-	case "windows":
-		if p, _ := cfg["path"].(string); p != "" {
-			return "ok"
-		}
-		return "missing path"
 	case "mikrotik":
 		if h, _ := cfg["host"].(string); h != "" {
 			if u, _ := cfg["username"].(string); u != "" {
@@ -207,98 +179,9 @@ func dhcpStatus(src domain.DHCPSource) string {
 	}
 }
 
-// dhcpMountPoint is where docker-compose.yml mounts the DHCP share
-// inside the daemon container.
-const dhcpMountPoint = "/mnt/dhcp"
-
-func runDHCPSourcesSetPath(cmd *cobra.Command, args []string) {
-	if err := logger.Init(false); err != nil {
-		log.Fatal(err)
-	}
-
-	name := strings.TrimSpace(args[0])
-	path := strings.TrimSpace(args[1])
-	if path == "" {
-		log.Fatal("path cannot be empty")
-	}
-
-	// Accept both the container-internal form (/mnt/dhcp/...) and the
-	// host/Windows form (\\server\share\... or Z:\...) the operator
-	// actually sees; the latter is translated against BIDAR_DHCP_SHARE_SRC.
-	path, warn := translateDHCPPath(os.Getenv(envconfig.DHCPShareSrc), dhcpMountPoint, path)
-	if warn != "" {
-		logger.Warning("%s", warn)
-	}
-
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-	defer cancel()
-	databaseURL, err := db.DatabaseURLFromEnv()
-	if err != nil {
-		log.Fatal(err)
-	}
-	pool, err := db.Open(ctx, databaseURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer pool.Close()
-
-	id, err := store.New(pool).SetDHCPSourcePath(ctx, name, path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("source %d (%s): path -> %s\n", id, name, path)
-}
-
 func yesNo(b bool) string {
 	if b {
 		return "yes"
 	}
 	return "no"
-}
-
-// translateDHCPPath maps the path an operator types into the path the
-// daemon container can actually read:
-//
-//   - already container-internal (starts with mountPoint) -> unchanged;
-//   - starts with the configured share src (shareSrc) -> rewritten to
-//     mountPoint/<relative>, handling Windows separators and UNC/drive
-//     letter forms;
-//   - anything else -> stored as-is, with a warning when it looks like a
-//     Windows path that doesn't match the configured share (the daemon
-//     can only read mounted paths).
-func translateDHCPPath(shareSrc, mountPoint, given string) (string, string) {
-	g := normalizeWinPath(given)
-	if mountPoint != "" && (g == mountPoint || strings.HasPrefix(g, mountPoint+"/")) {
-		return g, ""
-	}
-
-	src := normalizeWinPath(shareSrc)
-	if src == "" || src == "." || src == ".." || strings.HasPrefix(src, "./") {
-		// No meaningful share configured: keep the path verbatim.
-		return given, ""
-	}
-
-	lowerG, lowerSrc := strings.ToLower(g), strings.ToLower(src)
-	switch {
-	case lowerG == lowerSrc:
-		return mountPoint, ""
-	case strings.HasPrefix(lowerG, lowerSrc+"/"):
-		return mountPoint + "/" + g[len(src)+1:], ""
-	case looksLikeWindowsPath(g):
-		return given, fmt.Sprintf("path %q does not start with the configured share %q (mounted at %s); the daemon can only read mounted paths",
-			given, shareSrc, mountPoint)
-	default:
-		return given, ""
-	}
-}
-
-// normalizeWinPath converts Windows separators to forward slashes.
-func normalizeWinPath(p string) string {
-	return strings.TrimRight(strings.ReplaceAll(p, "\\", "/"), "/")
-}
-
-// looksLikeWindowsPath reports whether p is a UNC path (//server/share)
-// or a drive-letter path (Z:/...).
-func looksLikeWindowsPath(p string) bool {
-	return strings.HasPrefix(p, "//") || (len(p) >= 2 && p[1] == ':')
 }

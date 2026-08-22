@@ -1,19 +1,15 @@
 package dhcp
 
-// Integration tests for the DHCP provider: Windows source_type reads
-// fixture lease-export files (synthetic addresses only); mikrotik
+// Integration tests for the DHCP provider: mikrotik
 // source_type talks to the fake RouterOS server from the mikrotik package
 // tests (rebuilt here); everything reconciles into a real Postgres via
 // testdb. Gated on BIDAR_TEST_DATABASE_URL.
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +29,7 @@ type dhcpHarness struct {
 	now      time.Time
 }
 
-func newDHCPHarness(t *testing.T, staleness time.Duration, dial routerosDial) *dhcpHarness {
+func newDHCPHarness(t *testing.T, dial routerosDial) *dhcpHarness {
 	t.Helper()
 	pool := testdb.Open(t, testdb.ScratchURL(t, testdb.BaseURL(t)))
 
@@ -47,7 +43,7 @@ func newDHCPHarness(t *testing.T, staleness time.Duration, dial routerosDial) *d
 	}
 
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
-	p, err := newWithDeps(Config{Staleness: staleness}, store.New(pool), enc, slog.Default(),
+	p, err := newWithDeps(Config{}, store.New(pool), enc, slog.Default(),
 		func() time.Time { return now }, dial)
 	if err != nil {
 		t.Fatalf("newWithDeps: %v", err)
@@ -76,97 +72,27 @@ func (h *dhcpHarness) seedSource(t *testing.T, name, sourceType, connConfig stri
 	return id
 }
 
-// writeWindowsExport writes a fixture lease-export file.
-func writeWindowsExport(t *testing.T, dir string, exportedAt time.Time, leases string) string {
-	t.Helper()
-	content := fmt.Sprintf(`{"exported_at": %q, "server": "fixture", "lease_count": 1, "leases": %s}`,
-		exportedAt.Format(time.RFC3339), leases)
-	path := filepath.Join(dir, "leases.json")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-	return path
-}
-
-const activeLeases = `[
-	{"AddressId": "192.0.2.50", "ClientId": "00-11-22-33-44-55", "HostName": "pc-one", "AddressState": "Active", "LeaseExpiryTime": "2026-08-15T12:00:00Z"},
-	{"AddressId": "192.0.2.51", "ClientId": "00-11-22-33-44-66", "HostName": "", "AddressState": "Active", "LeaseExpiryTime": "2026-08-15T12:00:00Z"},
-	{"AddressId": "192.0.2.52", "ClientId": "00-11-22-33-44-77", "HostName": "offered-pc", "AddressState": "Offered", "LeaseExpiryTime": "2026-08-08T12:30:00Z"}
-]`
-
-func TestWindowsFileExport(t *testing.T) {
-	h := newDHCPHarness(t, 24*time.Hour, nil)
-	dir := t.TempDir()
-	path := writeWindowsExport(t, dir, h.now.Add(-1*time.Hour), activeLeases)
-
-	h.seedSource(t, "win-fixture", "windows", fmt.Sprintf(`{"path": %q}`, path), "")
-
-	res, err := h.provider.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	// Only the two Active leases count; the Offered one is skipped.
-	if res.ItemsFound != 2 {
-		t.Errorf("ItemsFound = %d, want 2 (Offered lease filtered)", res.ItemsFound)
-	}
-	if !h.provider.Health().Healthy {
-		t.Errorf("Health = %+v", h.provider.Health())
-	}
-
-	ctx := context.Background()
-	// Active lease with a hostname: host created with name + IP + MAC.
-	h1, err := h.st.FindHostByIP(ctx, netip.MustParseAddr("192.0.2.50"))
-	if err != nil {
-		t.Fatalf("find host: %v", err)
-	}
-	if h1.Hostname == nil || *h1.Hostname != "pc-one" {
-		t.Errorf("hostname = %v, want pc-one", h1.Hostname)
-	}
-	if h1.CurrentMAC == nil || h1.CurrentMAC.String() != "00:11:22:33:44:55" {
-		t.Errorf("mac = %v", h1.CurrentMAC)
-	}
-	// No host for the Offered lease.
-	if _, err := h.st.FindHostByIP(ctx, netip.MustParseAddr("192.0.2.52")); err == nil {
-		t.Error("Offered lease must not create a host")
-	}
-
-	// Observations: 2, source=dhcp, linked.
-	var obs int
-	if err := h.pool.QueryRow(ctx,
-		`SELECT count(*) FROM host_observations WHERE source='dhcp' AND host_id IS NOT NULL`).Scan(&obs); err != nil {
-		t.Fatalf("count obs: %v", err)
-	}
-	if obs != 2 {
-		t.Errorf("dhcp observations = %d, want 2", obs)
-	}
-}
-
-func TestWindowsStaleFileIsSourceFailure(t *testing.T) {
-	h := newDHCPHarness(t, 24*time.Hour, nil)
-	dir := t.TempDir()
-	// 25h old vs 24h threshold: stale.
-	path := writeWindowsExport(t, dir, h.now.Add(-25*time.Hour), activeLeases)
-	h.seedSource(t, "win-stale", "windows", fmt.Sprintf(`{"path": %q}`, path), "")
-
-	res, err := h.provider.Run(context.Background())
-	if err == nil {
-		t.Fatalf("expected error: every source failed (stale file), got %+v", res)
-	}
-	if !strings.Contains(err.Error(), "stale") {
-		t.Errorf("error should mention staleness, got: %v", err)
-	}
-	if h.provider.Health().Healthy {
-		t.Error("Health should be unhealthy")
-	}
-}
-
-func TestWindowsMissingFileIsSourceFailure(t *testing.T) {
-	h := newDHCPHarness(t, 24*time.Hour, nil)
-	h.seedSource(t, "win-missing", "windows", `{"path": "/nonexistent/leases.json"}`, "")
-
+func TestWindowsUnimplemented(t *testing.T) {
+	h := newDHCPHarness(t, nil)
+	h.seedSource(t, "win-fixture", "windows", `{"path": "/tmp/leases.json"}`, "")
 	_, err := h.provider.Run(context.Background())
 	if err == nil {
-		t.Fatal("expected error for missing lease file")
+		t.Fatal("expected error for unimplemented windows source")
+	}
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("error should mention not implemented, got: %v", err)
+	}
+}
+
+func TestCiscoUnimplemented(t *testing.T) {
+	h := newDHCPHarness(t, nil)
+	h.seedSource(t, "cisco-fixture", "cisco", `{"host": "192.0.2.1"}`, "")
+	_, err := h.provider.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error for unimplemented cisco source")
+	}
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("error should mention not implemented, got: %v", err)
 	}
 }
 
@@ -194,7 +120,7 @@ func TestWindowsSourceFailsButMikrotikSucceeds(t *testing.T) {
 		return stub, nil
 	}
 
-	h := newDHCPHarness(t, 24*time.Hour, dial)
+	h := newDHCPHarness(t, dial)
 	h.seedSource(t, "win-broken", "windows", `{"path": "/nonexistent/leases.json"}`, "")
 	h.seedSource(t, "ros-fixture", "mikrotik", `{"host": "127.0.0.1", "username": "admin"}`, "ros-secret")
 
@@ -220,7 +146,7 @@ func TestWindowsSourceFailsButMikrotikSucceeds(t *testing.T) {
 }
 
 func TestISCSourceSkipped(t *testing.T) {
-	h := newDHCPHarness(t, 24*time.Hour, nil)
+	h := newDHCPHarness(t, nil)
 	h.seedSource(t, "isc-fixture", "isc", `{"path": "/etc/dhcp/dhcpd.leases"}`, "")
 
 	res, err := h.provider.Run(context.Background())
@@ -245,32 +171,9 @@ func mustMAC(t *testing.T, s string) net.HardwareAddr {
 }
 
 func TestConfigFromEnv(t *testing.T) {
-	t.Run("unset defaults to 24h", func(t *testing.T) {
-		t.Setenv("BIDAR_DHCP_STALENESS", "")
-		cfg, err := ConfigFromEnv()
-		if err != nil {
-			t.Fatalf("ConfigFromEnv: %v", err)
-		}
-		if cfg.Staleness != DefaultStaleness {
-			t.Errorf("Staleness = %v, want %v", cfg.Staleness, DefaultStaleness)
-		}
-	})
-
-	t.Run("custom duration", func(t *testing.T) {
-		t.Setenv("BIDAR_DHCP_STALENESS", "30m")
-		cfg, err := ConfigFromEnv()
-		if err != nil {
-			t.Fatalf("ConfigFromEnv: %v", err)
-		}
-		if cfg.Staleness != 30*time.Minute {
-			t.Errorf("Staleness = %v, want 30m", cfg.Staleness)
-		}
-	})
-
-	t.Run("invalid rejected", func(t *testing.T) {
-		t.Setenv("BIDAR_DHCP_STALENESS", "soon")
-		if _, err := ConfigFromEnv(); err == nil {
-			t.Fatal("expected error for invalid duration")
-		}
-	})
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
+	}
+	_ = cfg
 }

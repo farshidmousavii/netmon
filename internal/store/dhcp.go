@@ -65,39 +65,14 @@ func (s *Store) ListAllDHCPSources(ctx context.Context) ([]domain.DHCPSource, er
 	return sources, nil
 }
 
-// SetDHCPSourcePath sets connection_config.path for a windows source
-// (Phase 1's only file-backed type), preserving any other keys in
-// connection_config (e.g. host). Non-windows sources are rejected with a
-// clear error rather than silently no-op'd.
-func (s *Store) SetDHCPSourcePath(ctx context.Context, name, path string) (int64, error) {
-	var id int64
-	var sourceType string
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, source_type FROM dhcp_sources WHERE name = $1`, name).Scan(&id, &sourceType)
-	if err != nil {
-		return 0, notFound(err)
-	}
-	if sourceType != "windows" {
-		return 0, fmt.Errorf("source %q is type %q; only windows sources use a lease-export file path in Phase 1", name, sourceType)
-	}
-
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE dhcp_sources
-		SET connection_config = jsonb_set(coalesce(connection_config, '{}'::jsonb), '{path}', to_jsonb($2::text))
-		WHERE id = $1`, id, path)
-	if err != nil {
-		return 0, fmt.Errorf("set dhcp source path: %w", err)
-	}
-	if tag.RowsAffected() != 1 {
-		return 0, fmt.Errorf("%w", ErrNotFound)
-	}
-	return id, nil
-}
-
-// ValidDHCPSourceTypes are the allowed dhcp_sources.source_type values.
+// ValidDHCPSourceTypes are the schema-recognized dhcp_sources.source_type
+// values. windows/cisco are recognized but deliberately unimplemented in
+// Phase 1 — the admin CLI rejects them at add time and the DHCP provider
+// fails them clearly if a row ever exists (e.g. inserted via SQL).
 var ValidDHCPSourceTypes = map[string]bool{
 	"windows":  true,
 	"mikrotik": true,
+	"cisco":    true,
 	"isc":      true,
 	"other":    true,
 }
@@ -106,7 +81,7 @@ var ValidDHCPSourceTypes = map[string]bool{
 // clear error (the schema has no unique constraint on name).
 func (s *Store) AddDHCPSource(ctx context.Context, name, sourceType string, connectionConfig []byte, credentialEnc []byte) (int64, error) {
 	if !ValidDHCPSourceTypes[sourceType] {
-		return 0, fmt.Errorf("invalid source_type %q (use windows, mikrotik, isc or other)", sourceType)
+		return 0, fmt.Errorf("invalid source_type %q (recognized types: windows, mikrotik, cisco, isc, other)", sourceType)
 	}
 	if strings.TrimSpace(name) == "" {
 		return 0, fmt.Errorf("source name cannot be empty")

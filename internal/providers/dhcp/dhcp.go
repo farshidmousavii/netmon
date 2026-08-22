@@ -1,16 +1,12 @@
 // Package dhcp is the Phase 1 DHCP lease evidence provider. It iterates
 // every enabled dhcp_sources row and, per type:
 //
-//   - windows: reads a JSON lease-export file (produced on the DHCP server
-//     by scripts/export-dhcp-leases.ps1, made reachable by the operator —
-//     e.g. an OS-level SMB mount; no SMB client lives in this codebase).
-//     The file must carry an exported_at timestamp newer than the
-//     configured staleness threshold — an old or missing file is a source
-//     failure, never silently treated as fresh.
 //   - mikrotik: dials the shared internal/providers/mikrotik RouterOS API
-//     client (credentials decrypted via internal/crypto) and prints the
+//     client (credentials decrypted via internal/crypto) and reads the
 //     active lease table.
-//   - isc/other: skipped cleanly (not needed for this deployment).
+//   - windows, cisco, isc, other: not implemented in Phase 1 — a clear
+//     unimplemented error is returned, never a silent no-op. See
+//     docs/roadmap.md and docs/architecture.md for the reasoning.
 //
 // Read-only like every provider; never imports internal/device.
 package dhcp
@@ -23,50 +19,24 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/domain"
-	"github.com/farshidmousavii/bidar/internal/envconfig"
 	"github.com/farshidmousavii/bidar/internal/providers"
 	"github.com/farshidmousavii/bidar/internal/providers/mikrotik"
 	"github.com/farshidmousavii/bidar/internal/providers/reconcile"
 	"github.com/farshidmousavii/bidar/internal/store"
 )
 
-// DefaultStaleness is how old a Windows lease-export file may be before
-// the collector refuses it (configurable via BIDAR_DHCP_STALENESS).
-// 24h matches a daily scheduled task with generous slack; a broken task
-// shows up as a failed source within a day.
-const DefaultStaleness = 24 * time.Hour
+// Config is the DHCP provider's configuration (extensions point for
+// future options; empty in Phase 1 where only mikrotik is implemented).
+type Config struct{}
 
-// Config is the DHCP provider's own configuration.
-type Config struct {
-	// Staleness bounds the age of Windows lease-export files.
-	Staleness time.Duration
-}
-
-// ConfigFromEnv loads Config from BIDAR_DHCP_STALENESS (Go duration,
-// default 24h). An unparsable value fails loudly rather than silently
-// accepting everything as fresh.
+// ConfigFromEnv loads Config (no env vars in Phase 1; kept for symmetry
+// with other providers and future extensibility).
 func ConfigFromEnv() (Config, error) {
-	raw := strings.TrimSpace(os.Getenv(envconfig.DHCPStaleness))
-	if raw == "" {
-		return Config{Staleness: DefaultStaleness}, nil
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
-		return Config{}, fmt.Errorf("%s: invalid duration %q (use e.g. \"24h\"): %w", envconfig.DHCPStaleness, raw, err)
-	}
-	return Config{Staleness: d}, nil
-}
-
-// windowsConfig is the type-specific part of connection_config for
-// source_type='windows': the lease-export file path.
-type windowsConfig struct {
-	Path string `json:"path"`
+	return Config{}, nil
 }
 
 // mikrotikConfig is the type-specific part of connection_config for
@@ -92,14 +62,13 @@ type Provider struct {
 	store        *store.Store
 	enc          *crypto.Encryptor
 	logger       *slog.Logger
-	staleness    time.Duration
 	now          func() time.Time
 	dialRouterOS routerosDial
 
 	health providers.Health
 }
 
-// New returns a DHCP provider using real file reads and RouterOS dialing.
+// New returns a DHCP provider using real RouterOS dialing.
 func New(cfg Config, st *store.Store, enc *crypto.Encryptor, logger *slog.Logger) (*Provider, error) {
 	return newWithDeps(cfg, st, enc, logger, time.Now, realRouterOSDial)
 }
@@ -112,16 +81,13 @@ func newWithDeps(cfg Config, st *store.Store, enc *crypto.Encryptor, logger *slo
 	if dial == nil {
 		dial = realRouterOSDial
 	}
-	if cfg.Staleness <= 0 {
-		cfg.Staleness = DefaultStaleness
-	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Provider{store: st, enc: enc, logger: logger, staleness: cfg.Staleness, now: now, dialRouterOS: dial}, nil
+	return &Provider{store: st, enc: enc, logger: logger, now: now, dialRouterOS: dial}, nil
 }
 
 // Name implements providers.Provider.
@@ -177,97 +143,21 @@ func (p *Provider) Run(ctx context.Context) (providers.Result, error) {
 }
 
 // pollSource dispatches one dhcp_sources row to its type handler.
+// Only mikrotik is implemented in Phase 1; other types return a clear
+// unimplemented error (never a silent skip) so misconfiguration is
+// visible.
 func (p *Provider) pollSource(ctx context.Context, src domain.DHCPSource, now time.Time) (int, error) {
 	switch src.SourceType {
-	case "windows":
-		return p.pollWindowsFile(ctx, src, now)
 	case "mikrotik":
 		return p.pollMikrotik(ctx, src, now)
+	case "windows", "cisco":
+		return 0, fmt.Errorf("source_type %q is not implemented in Phase 1 (only mikrotik is supported); see docs/architecture.md", src.SourceType)
 	case "isc", "other":
 		p.logger.Debug("dhcp: source type not supported yet, skipping", "source_id", src.ID, "source_type", src.SourceType)
 		return 0, nil
 	default:
 		return 0, fmt.Errorf("unknown source_type %q", src.SourceType)
 	}
-}
-
-// -- windows (file export, Method B) -----------------------------------------
-
-// windowsExport mirrors scripts/export-dhcp-leases.ps1's JSON envelope.
-type windowsExport struct {
-	ExportedAt string         `json:"exported_at"`
-	Server     string         `json:"server"`
-	Leases     []windowsLease `json:"leases"`
-}
-
-// windowsLease mirrors Get-DhcpServerv4Lease's serialized fields.
-type windowsLease struct {
-	AddressID       string `json:"AddressId"`
-	ClientID        string `json:"ClientId"`
-	HostName        string `json:"HostName"`
-	AddressState    string `json:"AddressState"`
-	LeaseExpiryTime string `json:"LeaseExpiryTime"`
-}
-
-func (p *Provider) pollWindowsFile(ctx context.Context, src domain.DHCPSource, now time.Time) (int, error) {
-	var wc windowsConfig
-	if err := json.Unmarshal(src.ConnectionConfig, &wc); err != nil {
-		return 0, fmt.Errorf("parse connection_config: %w", err)
-	}
-	if wc.Path == "" {
-		return 0, fmt.Errorf("connection_config.path is empty (lease export file)")
-	}
-
-	data, err := os.ReadFile(wc.Path)
-	if err != nil {
-		return 0, fmt.Errorf("read lease export %q: %w", wc.Path, err)
-	}
-
-	var export windowsExport
-	if err := json.Unmarshal(data, &export); err != nil {
-		return 0, fmt.Errorf("parse lease export %q: %w", wc.Path, err)
-	}
-	exportedAt, err := time.Parse(time.RFC3339, export.ExportedAt)
-	if err != nil {
-		return 0, fmt.Errorf("parse exported_at in %q: %w", wc.Path, err)
-	}
-	age := now.Sub(exportedAt)
-	if age > p.staleness || age < 0 {
-		return 0, fmt.Errorf("lease export %q is %s old (stale: threshold %s)", wc.Path, age.Round(time.Second), p.staleness)
-	}
-
-	count := 0
-	for _, lease := range export.Leases {
-		select {
-		case <-ctx.Done():
-			return count, ctx.Err()
-		default:
-		}
-		// Only actively leased addresses are network-presence evidence;
-		// "Offered"/"Expired" rows are noise for a live inventory.
-		if !strings.EqualFold(lease.AddressState, "Active") {
-			continue
-		}
-		ip, err := netip.ParseAddr(lease.AddressID)
-		if err != nil {
-			continue
-		}
-		mac, err := net.ParseMAC(normalizeWindowsMAC(lease.ClientID))
-		if err != nil {
-			continue
-		}
-		if err := p.reconcileLease(ctx, src, "windows", lease.HostName, ip, mac, lease.AddressState, lease.LeaseExpiryTime, now); err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
-}
-
-// normalizeWindowsMAC converts Get-DhcpServerv4Lease's "00-11-22-33-44-55"
-// into net.ParseMAC's "00:11:22:33:44:55".
-func normalizeWindowsMAC(clientID string) string {
-	return strings.ReplaceAll(strings.TrimSpace(clientID), "-", ":")
 }
 
 // -- mikrotik (RouterOS API) --------------------------------------------------

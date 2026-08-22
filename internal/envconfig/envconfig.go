@@ -36,11 +36,6 @@ const (
 	// "DC=corp,DC=local".
 	ADBaseDN = "BIDAR_AD_BASE_DN"
 
-	// DHCPStaleness is how old a Windows DHCP lease-export file may be
-	// before the collector refuses it (Go duration, e.g. "24h"; default
-	// 24h). Stale data is a failed source, never silently fresh data.
-	DHCPStaleness = "BIDAR_DHCP_STALENESS"
-
 	// ADInterval is how often the AD provider syncs (Go duration,
 	// default 24h).
 	ADInterval = "BIDAR_AD_INTERVAL"
@@ -56,13 +51,6 @@ const (
 	// ICMPInterval is how often the ICMP sweep runs (Go duration,
 	// default 5m).
 	ICMPInterval = "BIDAR_ICMP_INTERVAL"
-
-	// DHCPShareSrc is the host/Windows side of the share compose mounts
-	// read-only at /mnt/dhcp inside the daemon container (from the
-	// compose-level DHCP_SHARE_SRC). The CLI uses it to translate a
-	// Windows share path given to dhcp-sources set-path into the
-	// container-internal path.
-	DHCPShareSrc = "BIDAR_DHCP_SHARE_SRC"
 
 	// TestDatabaseURL points integration tests at a scratch Postgres
 	// (test-only; not a runtime configuration variable).

@@ -100,10 +100,12 @@ func Existing(ctx context.Context, st *store.Store, ip *netip.Addr) (*domain.Hos
 // UnlinkedObservation appends a host_observations row with host_id NULL —
 // liveness evidence for an IP no host row exists for yet. Later ARP/DHCP
 // evidence creates the host; future ICMP runs then link to it by IP.
-func UnlinkedObservation(ctx context.Context, st *store.Store, source string, ip *netip.Addr, detail []byte, now time.Time) error {
+// hostname is the PTR result when available (otherwise nil).
+func UnlinkedObservation(ctx context.Context, st *store.Store, source string, ip *netip.Addr, hostname *string, detail []byte, now time.Time) error {
 	obs := &domain.Observation{
 		Source:     source,
 		IP:         ip,
+		Hostname:   hostname,
 		Detail:     detail,
 		ObservedAt: now,
 	}
