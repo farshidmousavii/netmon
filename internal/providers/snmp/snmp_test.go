@@ -33,6 +33,8 @@ type fakeClient struct {
 	static    []snmp.Varbind
 	staticErr error
 	getErr    error
+	fdb       map[string][]snmp.Varbind // generic walk responses (MAC tables)
+	fdbErr    error                     // fails every generic walk
 	closed    bool
 }
 
@@ -50,6 +52,12 @@ func (f *fakeClient) Get(_ context.Context, oids ...string) ([]snmp.Varbind, err
 func (f *fakeClient) WalkTable(_ context.Context, baseOID string) ([]snmp.Varbind, error) {
 	if baseOID == oidVlanStaticName {
 		return f.static, f.staticErr
+	}
+	if f.fdbErr != nil {
+		return nil, f.fdbErr
+	}
+	if rows, ok := f.fdb[baseOID]; ok {
+		return rows, nil
 	}
 	return nil, nil
 }
@@ -75,6 +83,9 @@ type harness struct {
 	defaultClient snmpClient
 	profileID     int64
 	dialErr       map[string]error
+	// dialForCommunity routes community@vlan contexts (BRIDGE-MIB walks)
+	// to their own canned clients.
+	dialForCommunity map[string]snmpClient
 }
 
 // defaultClient is the interface type on purpose: a bare nil literal
@@ -91,11 +102,12 @@ func newHarness(t *testing.T, defaultClient snmpClient) *harness {
 	}
 
 	h := &harness{
-		pool:          pool,
-		st:            st,
-		now:           time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC),
-		defaultClient: defaultClient,
-		dialErr:       map[string]error{},
+		pool:             pool,
+		st:               st,
+		now:              time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC),
+		defaultClient:    defaultClient,
+		dialErr:          map[string]error{},
+		dialForCommunity: map[string]snmpClient{},
 	}
 
 	var pid int64
@@ -113,6 +125,9 @@ func newHarness(t *testing.T, defaultClient snmpClient) *harness {
 	p, err := newWithDial(st, enc, slog.Default(),
 		func() time.Time { return h.now },
 		func(_ context.Context, cfg snmp.Config) (snmpClient, error) {
+			if c, ok := h.dialForCommunity[cfg.Community]; ok {
+				return c, nil
+			}
 			if e, ok := h.dialErr[cfg.Target]; ok {
 				return nil, e
 			}
@@ -149,6 +164,24 @@ func (h *harness) addDevice(t *testing.T, name string) string {
 // failDial makes every connection to target fail.
 func (h *harness) failDial(target, why string) {
 	h.dialErr[target] = targetError(why)
+}
+
+// addVlanClient registers a canned client for one community@vlan context.
+func (h *harness) addVlanClient(community string, c *fakeClient) {
+	h.dialForCommunity[community] = c
+}
+
+// macSuffix converts a MAC string into its 6 OID index components.
+func macSuffix(s string) []int {
+	m, err := net.ParseMAC(s)
+	if err != nil {
+		panic(err)
+	}
+	out := make([]int, len(m))
+	for i, b := range m {
+		out[i] = int(b)
+	}
+	return out
 }
 
 // fixtureClient builds the standard happy-path client: system info,
@@ -343,5 +376,110 @@ func TestBuildVLANsUnionSorted(t *testing.T) {
 	}
 	if got[3].Name != nil {
 		t.Errorf("PVID-only vlan 99 should have no name, got %v", got[3].Name)
+	}
+}
+
+func TestRunBridgeMIBMACsPerVlan(t *testing.T) {
+	h := newHarness(t, fixtureClient())
+
+	// VLAN 10: one MAC learned on bridge port 1 (ifIndex 1).
+	h.addVlanClient("public@10", &fakeClient{fdb: map[string][]snmp.Varbind{
+		oidDot1dTpFdbPort:     {{OID: oidDot1dTpFdbPort + ".0.17.34.51.68.85", Suffix: macSuffix("00:11:22:33:44:01"), Value: 1}},
+		oidDot1dBasePortIfIdx: {{Suffix: []int{1}, Value: 1}},
+	}})
+	// VLAN 20: one MAC on bridge port 2 (ifIndex 2, the SVI).
+	h.addVlanClient("public@20", &fakeClient{fdb: map[string][]snmp.Varbind{
+		oidDot1dTpFdbPort:     {{Suffix: macSuffix("00:11:22:33:44:02"), Value: 2}},
+		oidDot1dBasePortIfIdx: {{Suffix: []int{2}, Value: 2}},
+	}})
+	// VLAN 99 (PVID-derived): no client registered -> default client
+	// answers with an empty table; a legitimately empty VLAN.
+
+	res, err := h.p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// 3 interfaces + 3 VLANs + 2 MAC entries.
+	if res.ItemsFound != 8 {
+		t.Errorf("ItemsFound = %d, want 8", res.ItemsFound)
+	}
+
+	ctx := context.Background()
+	var macs int
+	if err := h.pool.QueryRow(ctx, `SELECT count(*) FROM mac_table_current`).Scan(&macs); err != nil {
+		t.Fatal(err)
+	}
+	if macs != 2 {
+		t.Fatalf("mac rows = %d, want 2", macs)
+	}
+	rows := map[int]int32{} // if_index -> vlan
+	q, err := h.pool.Query(ctx, `
+		SELECT i.if_index, m.vlan_number
+		FROM mac_table_current m JOIN device_interfaces i ON i.id = m.interface_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer q.Close()
+	for q.Next() {
+		var idx int
+		var vlan int32
+		if err := q.Scan(&idx, &vlan); err != nil {
+			t.Fatal(err)
+		}
+		rows[idx] = vlan
+	}
+	if rows[1] != 10 || rows[2] != 20 {
+		t.Errorf("mac placement = %v, want if_index 1->vlan 10 and 2->vlan 20", rows)
+	}
+}
+
+func TestRunQBridgeFallback(t *testing.T) {
+	c := fixtureClient()
+	c.fdb = map[string][]snmp.Varbind{
+		// One Q-BRIDGE entry: vlan 10, MAC ...:03, bridge port 1.
+		oidDot1qTpFdbPort:     {{Suffix: append([]int{10}, macSuffix("00:11:22:33:44:03")...), Value: 1}},
+		oidDot1dBasePortIfIdx: {{Suffix: []int{1}, Value: 1}},
+	}
+	h := newHarness(t, c)
+
+	res, err := h.p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// 3 interfaces + 3 VLANs + 1 MAC via the fallback path.
+	if res.ItemsFound != 7 {
+		t.Errorf("ItemsFound = %d, want 7", res.ItemsFound)
+	}
+	var vlan int32
+	var mac string
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT vlan_number, mac_address::text FROM mac_table_current`).
+		Scan(&vlan, &mac); err != nil {
+		t.Fatal(err)
+	}
+	if vlan != 10 || mac != "00:11:22:33:44:03" {
+		t.Errorf("mac row = %d/%s, want 10/00:11:22:33:44:03", vlan, mac)
+	}
+}
+
+func TestRunAllMACSourcesFail(t *testing.T) {
+	c := fixtureClient()
+	c.fdbErr = targetError("walk timeout") // fails BRIDGE-MIB and Q-BRIDGE walks
+	h := newHarness(t, c)
+
+	_, err := h.p.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error when every MAC source fails")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("all 1 devices failed")) {
+		t.Errorf("err = %v, want all-devices-failed message", err)
+	}
+	var failures int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT consecutive_failures FROM network_devices WHERE name = 'fixture-sw'`).Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 1 {
+		t.Errorf("consecutive_failures = %d, want 1", failures)
 	}
 }

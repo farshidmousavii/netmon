@@ -33,3 +33,25 @@ func (s *Store) UpsertDeviceVLANs(ctx context.Context, deviceID int64, vlans []d
 
 	return tx.Commit(ctx)
 }
+
+// ListDeviceVLANNumbers returns the VLAN numbers last seen on a device —
+// the fallback loop list for BRIDGE-MIB @vlan walks when the current
+// poll discovered none.
+func (s *Store) ListDeviceVLANNumbers(ctx context.Context, deviceID int64) ([]int32, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT vlan_number FROM device_vlans WHERE device_id = $1 ORDER BY vlan_number`, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("list device vlans: %w", err)
+	}
+	defer rows.Close()
+
+	var out []int32
+	for rows.Next() {
+		var n int32
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("scan vlan number: %w", err)
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}

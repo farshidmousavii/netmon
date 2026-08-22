@@ -3,6 +3,8 @@ package snmp
 // MIB OIDs and varbind-to-domain translation for the Cisco SNMP provider.
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"regexp"
 	"sort"
@@ -30,6 +32,11 @@ const (
 	oidDot1qPvid    = "1.3.6.1.2.1.17.7.1.4.5.1.1" // Q-BRIDGE dot1qPvid (ifIndex-indexed)
 
 	oidVlanStaticName = "1.3.6.1.2.1.17.7.1.4.3.1.1" // Q-BRIDGE dot1qVlanStaticName (vlan-indexed)
+
+	// MAC-table OIDs.
+	oidDot1dTpFdbPort     = "1.3.6.1.2.1.17.4.3.1.2"     // BRIDGE-MIB dot1dTpFdbPort; suffix ends in the 6 MAC octets
+	oidDot1dBasePortIfIdx = "1.3.6.1.2.1.17.1.4.1.2"     // dot1dBasePortIfIndex; suffix: bridge port; value: ifIndex
+	oidDot1qTpFdbPort     = "1.3.6.1.2.1.17.7.1.2.2.1.1" // Q-BRIDGE dot1qTpFdbPort; suffix: vlan + 6 MAC octets
 )
 
 // interfaceCols is the column order buildDeviceInterfaces expects; pass
@@ -232,4 +239,110 @@ func buildVLANs(staticRows []snmp.Varbind, pvids map[int32]bool) []domain.Device
 
 	sort.Slice(out, func(i, j int) bool { return out[i].VlanNumber < out[j].VlanNumber })
 	return out
+}
+
+// macFromSuffix converts the last six OID suffix components into a MAC.
+func macFromSuffix(sfx []int) (net.HardwareAddr, bool) {
+	if len(sfx) < 6 {
+		return nil, false
+	}
+	tail := sfx[len(sfx)-6:]
+	mac := make(net.HardwareAddr, 6)
+	for i, n := range tail {
+		if n < 0 || n > 255 {
+			return nil, false
+		}
+		mac[i] = byte(n)
+	}
+	return mac, true
+}
+
+// bridgePortMap reads dot1dBasePortIfIndex and maps bridge port number
+// -> interface id (via the if_index->id map from this poll's interface
+// sync). Bridge ports are not ifIndexes; BRIDGE-MIB speaks in its own
+// port numbering.
+func bridgePortMap(ctx context.Context, c snmpClient, ifaceIDs map[int]int64) (map[int]int64, error) {
+	rows, err := c.WalkTable(ctx, oidDot1dBasePortIfIdx)
+	if err != nil {
+		return nil, fmt.Errorf("walk dot1dBasePortIfIndex: %w", err)
+	}
+	m := make(map[int]int64, len(rows))
+	for _, r := range rows {
+		if len(r.Suffix) != 1 {
+			continue
+		}
+		ifIdx, ok := intValue(r.Value)
+		if !ok {
+			continue
+		}
+		if id, ok := ifaceIDs[int(ifIdx)]; ok {
+			m[r.Suffix[0]] = id
+		}
+	}
+	return m, nil
+}
+
+// collectBridgeVlan reads one VLAN's forwarding table from a client
+// already bound to that VLAN's context (community@vlan indexing).
+func collectBridgeVlan(ctx context.Context, c snmpClient, vlan int32, ifaceIDs map[int]int64) ([]domain.MACTableEntry, error) {
+	ports, err := c.WalkTable(ctx, oidDot1dTpFdbPort)
+	if err != nil {
+		return nil, fmt.Errorf("walk dot1dTpFdbPort: %w", err)
+	}
+	bpToIf, err := bridgePortMap(ctx, c, ifaceIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]domain.MACTableEntry, 0, len(ports))
+	for _, r := range ports {
+		mac, ok := macFromSuffix(r.Suffix)
+		if !ok {
+			continue
+		}
+		e := domain.MACTableEntry{VLANNumber: &vlan, MAC: mac}
+		if bp, ok := intValue(r.Value); ok {
+			if id, ok := bpToIf[int(bp)]; ok {
+				e.InterfaceID = &id
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// collectQbridge reads the whole forwarding database in one walk on
+// platforms that answer Q-BRIDGE without per-VLAN contexts.
+func collectQbridge(ctx context.Context, c snmpClient, ifaceIDs map[int]int64) ([]domain.MACTableEntry, error) {
+	rows, err := c.WalkTable(ctx, oidDot1qTpFdbPort)
+	if err != nil {
+		return nil, fmt.Errorf("walk dot1qTpFdbPort: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	bpToIf, err := bridgePortMap(ctx, c, ifaceIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]domain.MACTableEntry, 0, len(rows))
+	for _, r := range rows {
+		if len(r.Suffix) < 7 { // vlan + 6 MAC octets
+			continue
+		}
+		vlan := int32(r.Suffix[0])
+		mac, ok := macFromSuffix(r.Suffix[1:])
+		if !ok {
+			continue
+		}
+		e := domain.MACTableEntry{VLANNumber: &vlan, MAC: mac}
+		if bp, ok := intValue(r.Value); ok {
+			if id, ok := bpToIf[int(bp)]; ok {
+				e.InterfaceID = &id
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }

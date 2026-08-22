@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,7 +180,8 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("walk interface table: %w", err))
 	}
 	ifaces, pvids := buildDeviceInterfaces(rows, upTimeTicks, hasUpTime, now)
-	if _, err := p.store.UpsertDeviceInterfaces(ctx, dev.ID, ifaces, now); err != nil {
+	ifaceIDs, err := p.store.UpsertDeviceInterfaces(ctx, dev.ID, ifaces, now)
+	if err != nil {
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("store interfaces: %w", err))
 	}
 	items += len(ifaces)
@@ -200,10 +202,95 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 		items += len(vlans)
 	}
 
+	// MAC table: BRIDGE-MIB per VLAN (community@vlan), Q-BRIDGE fallback.
+	n, err := p.pollMACs(ctx, dev, cfg, ifaceIDs, vlans, now)
+	if err != nil {
+		return p.pollFailed(ctx, dev, now, err)
+	}
+	items += n
+
 	if err := p.store.UpdateDevicePollHealth(ctx, dev.ID, nil, now); err != nil {
 		return items, fmt.Errorf("record poll health: %w", err)
 	}
 	return items, nil
+}
+
+// pollMACs collects the forwarding database. Primary path is BRIDGE-MIB
+// dot1dTpFdbTable walked once per known VLAN under community@vlan
+// indexing (v2c only — v3 has no @vlan trick here); if that yields
+// nothing, the Q-BRIDGE dot1qTpFdbTable is tried in a single walk.
+// Entries land in SyncDeviceMACTable (transition-based current+history).
+// A device whose MAC sources all fail fails the whole poll: silent
+// half-data would look like a healthy switch that simply has no endpoints.
+func (p *Provider) pollMACs(ctx context.Context, dev domain.Device, cfg snmp.Config,
+	ifaceIDs map[int]int64, vlans []domain.DeviceVLAN, now time.Time,
+) (int, error) {
+	var entries []domain.MACTableEntry
+	var bridgeFailures int
+
+	if cfg.Security == nil { // v2c: community@vlan indexing applies
+		numbers := make([]int32, 0, len(vlans))
+		for _, v := range vlans {
+			numbers = append(numbers, v.VlanNumber)
+		}
+		if len(numbers) == 0 {
+			// Nothing discovered this poll; retry last poll's set so a
+			// transient VLAN-discovery miss doesn't blind the collector.
+			dbNums, err := p.store.ListDeviceVLANNumbers(ctx, dev.ID)
+			if err != nil {
+				p.logger.Warn("snmp: could not load stored vlans", "device_id", dev.ID, "err", err)
+			} else {
+				numbers = dbNums
+			}
+		}
+
+		for _, n := range numbers {
+			cfgV := cfg
+			cfgV.Community = cfg.Community + "@" + strconv.FormatInt(int64(n), 10)
+			c, err := p.dial(ctx, cfgV)
+			if err != nil {
+				bridgeFailures++
+				p.logger.Warn("snmp: vlan fdb connect failed",
+					"device_id", dev.ID, "vlan", n, "err", err)
+				continue
+			}
+			e, err := collectBridgeVlan(ctx, c, n, ifaceIDs)
+			c.Close()
+			if err != nil {
+				bridgeFailures++
+				p.logger.Warn("snmp: vlan fdb walk failed",
+					"device_id", dev.ID, "vlan", n, "err", err)
+				continue
+			}
+			entries = append(entries, e...)
+		}
+	}
+
+	if len(entries) == 0 {
+		main, err := p.dial(ctx, cfg)
+		if err != nil {
+			if bridgeFailures > 0 {
+				return 0, fmt.Errorf("no MAC source answered (%d vlan walks failed; qbridge connect: %w)", bridgeFailures, err)
+			}
+			return 0, fmt.Errorf("connect for qbridge: %w", err)
+		}
+		qb, err := collectQbridge(ctx, main, ifaceIDs)
+		main.Close()
+		if err != nil {
+			p.logger.Debug("snmp: qbridge unavailable", "device_id", dev.ID, "err", err)
+		} else {
+			entries = qb
+		}
+	}
+
+	if len(entries) == 0 && bridgeFailures > 0 {
+		return 0, fmt.Errorf("bridge-mib walks failed on %d vlans and qbridge was empty", bridgeFailures)
+	}
+
+	if err := p.store.SyncDeviceMACTable(ctx, dev.ID, entries, now); err != nil {
+		return 0, fmt.Errorf("store mac table: %w", err)
+	}
+	return len(entries), nil
 }
 
 // pollFailed records the failure on the device's circuit-breaker counters
