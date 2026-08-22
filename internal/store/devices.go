@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -190,6 +191,25 @@ func (s *Store) UpdateDevicePollHealth(ctx context.Context, id int64, pollErr *s
 	}
 	if err != nil {
 		return fmt.Errorf("update device poll health: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w", ErrNotFound)
+	}
+	return nil
+}
+
+// UpdateDeviceFirmwareVersion stores a polled device's reported firmware
+// string (parsed from sysDescr by the SNMP provider). Best-effort
+// enrichment — never overwrites with an empty value.
+func (s *Store) UpdateDeviceFirmwareVersion(ctx context.Context, id int64, version string) error {
+	if strings.TrimSpace(version) == "" {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE network_devices SET firmware_version = $2, updated_at = now() WHERE id = $1`,
+		id, version)
+	if err != nil {
+		return fmt.Errorf("update device firmware: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return fmt.Errorf("%w", ErrNotFound)
