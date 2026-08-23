@@ -93,15 +93,15 @@ func statusString(v any) string {
 
 // octetStringPtr converts an OctetString value to a trimmed string, nil
 // when absent or blank. Real-world agents put raw binary in "string"
-// fields (CDP device ids especially): trailing NULs are stripped and
-// invalid UTF-8 replaced rather than passed through — Postgres would
-// reject the row outright.
+// fields (CDP device ids especially): NUL bytes are removed everywhere
+// (Postgres rejects them in text even when the surrounding UTF-8 is
+// valid) and invalid sequences replaced rather than passed through.
 func octetStringPtr(v any) *string {
 	b, ok := v.([]byte)
 	if !ok {
 		return nil
 	}
-	s := strings.TrimRight(string(b), "\x00")
+	s := strings.ReplaceAll(string(b), "\x00", "")
 	s = strings.ToValidUTF8(s, "\uFFFD")
 	s = strings.TrimSpace(s)
 	if s == "" {

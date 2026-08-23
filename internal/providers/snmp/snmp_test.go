@@ -671,15 +671,18 @@ func TestOctetStringPtrSanitizesAgentBytes(t *testing.T) {
 	// Real CDP cache data carries raw bytes: invalid UTF-8 sequences and
 	// trailing NULs are common. They must be sanitized, not rejected by
 	// Postgres mid-poll.
-	got := octetStringPtr([]byte{'S', 'W', '-', 0xAC, 0xB0, 0x00, 0x00})
+	got := octetStringPtr([]byte{'S', 'W', '-', 0xAC, 0xB0, 0x00, 'C'})
 	if got == nil {
 		t.Fatal("expected a sanitized string, got nil")
 	}
 	if !utf8.ValidString(*got) {
 		t.Errorf("sanitized string still invalid UTF-8: %q", *got)
 	}
-	if strings.HasSuffix(*got, "\x00") {
-		t.Errorf("trailing NULs not stripped: %q", *got)
+	if strings.ContainsRune(*got, '\x00') {
+		t.Errorf("embedded NUL not stripped: %q", *got)
+	}
+	if !strings.HasSuffix(*got, "C") {
+		t.Errorf("bytes after an embedded NUL lost: %q", *got)
 	}
 	if octetStringPtr([]byte{0x00, 0x00}) != nil {
 		t.Error("all-NUL octets should yield nil")
