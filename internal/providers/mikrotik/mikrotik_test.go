@@ -25,15 +25,24 @@ type fakeRouterOS struct {
 	password string
 	mode     string // "plain" | "challenge"
 	leases   []map[string]string
+	// rows serves additional commands generically (Phase 2 inventory
+	// reads); set before any client dials.
+	rows map[string][]map[string]string
 }
 
 func newFakeRouterOS(t *testing.T, mode, password string, leases []map[string]string) *fakeRouterOS {
+	return newFakeRouterOSWithRows(t, mode, password, leases, nil)
+}
+
+func newFakeRouterOSWithRows(t *testing.T, mode, password string, leases []map[string]string,
+	rows map[string][]map[string]string,
+) *fakeRouterOS {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	f := &fakeRouterOS{t: t, ln: ln, mode: mode, password: password, leases: leases}
+	f := &fakeRouterOS{t: t, ln: ln, mode: mode, password: password, leases: leases, rows: rows}
 	go f.serve()
 	t.Cleanup(func() { ln.Close() })
 	return f
@@ -93,6 +102,17 @@ func (f *fakeRouterOS) handle(conn net.Conn) {
 			}
 			w.write([]string{"!done"})
 		default:
+			if rows, ok := f.rows[sentence[0]]; ok {
+				for _, row := range rows {
+					words := []string{"!re"}
+					for k, v := range row {
+						words = append(words, "="+k+"="+v)
+					}
+					w.write(words)
+				}
+				w.write([]string{"!done"})
+				continue
+			}
 			w.write([]string{"!trap", "=message=unknown command"})
 		}
 	}
@@ -210,5 +230,68 @@ func TestTrapError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown command") {
 		t.Errorf("error should carry the trap message, got: %v", err)
+	}
+}
+
+func TestARPs(t *testing.T) {
+	rows := map[string][]map[string]string{
+		"/ip/arp/print": {
+			{"id": "*A1", "address": "192.0.2.60", "mac-address": "02:AA:BB:CC:DD:01", "interface": "bridge-lan", "dhcp": "true"},
+			{"id": "*A2", "address": "192.0.2.61", "mac-address": "02:AA:BB:CC:DD:02", "interface": "ether2", "dhcp": "false"},
+			{"id": "*A3", "address": "192.0.2.62"},            // no MAC -> skipped
+			{"id": "*A4", "mac-address": "02:AA:BB:CC:DD:04"}, // no address -> skipped
+		},
+	}
+	f := newFakeRouterOSWithRows(t, "plain", "s3cret", nil, rows)
+
+	c, err := dialFake(context.Background(), f, "admin", "s3cret")
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.ARPs(context.Background())
+	if err != nil {
+		t.Fatalf("ARPs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d arps, want 2 (incomplete rows skipped): %+v", len(got), got)
+	}
+	if got[0].Address.String() != "192.0.2.60" || got[0].MAC.String() != "02:aa:bb:cc:dd:01" ||
+		got[0].Interface != "bridge-lan" || !got[0].DHCP {
+		t.Errorf("arp 0 = %+v", got[0])
+	}
+	if got[1].Interface != "ether2" || got[1].DHCP {
+		t.Errorf("arp 1 = %+v", got[1])
+	}
+}
+
+func TestWirelessRegistrations(t *testing.T) {
+	rows := map[string][]map[string]string{
+		"/interface/wireless/registration-table/print": {
+			{"id": "*W1", "interface": "wlan1", "mac-address": "02:11:22:33:44:66",
+				"service": "802.11", "signal-strength": "-58dBm@6Mbps", "last-ip": "192.0.2.70"},
+			{"id": "*W2", "interface": "wlan1", "mac-address": "not-a-mac"}, // skipped
+		},
+	}
+	f := newFakeRouterOSWithRows(t, "plain", "s3cret", nil, rows)
+
+	c, err := dialFake(context.Background(), f, "admin", "s3cret")
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	got, err := c.WirelessRegistrations(context.Background())
+	if err != nil {
+		t.Fatalf("WirelessRegistrations: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d registrations, want 1: %+v", len(got), got)
+	}
+	w := got[0]
+	if w.Interface != "wlan1" || w.MAC.String() != "02:11:22:33:44:66" ||
+		w.Service != "802.11" || w.Signal != "-58dBm@6Mbps" || w.LastIP.String() != "192.0.2.70" {
+		t.Errorf("registration = %+v", w)
 	}
 }
