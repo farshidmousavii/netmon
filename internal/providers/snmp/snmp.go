@@ -200,15 +200,20 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 	}
 	items += len(ifaces)
 
-	// VLANs: Q-BRIDGE static names best-effort, unioned with port PVIDs
-	// (many IOS builds only answer Q-BRIDGE under community@vlan indexing;
-	// access-port PVIDs still reveal the VLANs in use).
+	// VLANs: Cisco VTP first — standard IOS answers it without
+	// community@vlan contexts, which is what seeds task-4b's per-VLAN
+	// BRIDGE-MIB walk. Q-BRIDGE static names and access-port PVIDs stay
+	// in the union as additional sources.
+	vtpRows, err := client.WalkTable(ctx, oidVtpVlanName)
+	if err != nil {
+		p.logger.Warn("snmp: vtp vlan table unavailable", "device_id", dev.ID, "err", err)
+	}
 	staticRows, err := client.WalkTable(ctx, oidVlanStaticName)
 	if err != nil {
 		p.logger.Warn("snmp: vlan static table unavailable; deriving from port PVIDs",
 			"device_id", dev.ID, "err", err)
 	}
-	vlans := buildVLANs(staticRows, pvids)
+	vlans := buildVLANs(vtpRows, staticRows, pvids)
 	if len(vlans) > 0 {
 		if err := p.store.UpsertDeviceVLANs(ctx, dev.ID, vlans, now); err != nil {
 			return p.pollFailed(ctx, dev, now, fmt.Errorf("store vlans: %w", err))

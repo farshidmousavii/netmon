@@ -32,7 +32,8 @@ const (
 	oidIfLastChange = "1.3.6.1.2.1.2.2.1.9"        // ifTable.ifLastChange (TimeTicks)
 	oidDot1qPvid    = "1.3.6.1.2.1.17.7.1.4.5.1.1" // Q-BRIDGE dot1qPvid (ifIndex-indexed)
 
-	oidVlanStaticName = "1.3.6.1.2.1.17.7.1.4.3.1.1" // Q-BRIDGE dot1qVlanStaticName (vlan-indexed)
+	oidVlanStaticName = "1.3.6.1.2.1.17.7.1.4.3.1.1"   // Q-BRIDGE dot1qVlanStaticName (vlan-indexed)
+	oidVtpVlanName    = "1.3.6.1.4.1.9.9.46.1.3.1.1.4" // CISCO-VTP-MIB vtpVlanName; suffix: domain + vlan
 
 	// MAC-table OIDs.
 	oidDot1dTpFdbPort     = "1.3.6.1.2.1.17.4.3.1.2"     // BRIDGE-MIB dot1dTpFdbPort; suffix ends in the 6 MAC octets
@@ -220,13 +221,16 @@ func BuildDeviceInterfaces(rows []snmp.TableRow, sysUpTime uint32, hasUpTime boo
 	return out, pvids
 }
 
-// buildVLANs merges Q-BRIDGE static VLAN names with VLANs only evidenced
-// by access-port PVIDs, sorted by number.
-func buildVLANs(staticRows []snmp.Varbind, pvids map[int32]bool) []domain.DeviceVLAN {
+// buildVLANs merges every VLAN-discovery source — Cisco VTP (readable
+// without community@vlan contexts on standard IOS), Q-BRIDGE static
+// names, and VLANs only evidenced by access-port PVIDs — sorted by
+// number. Both walk shapes reduce to "last suffix component is the
+// vlan": VTP indexes [domain, vlan], Q-BRIDGE [vlan].
+func buildVLANs(vtpRows, staticRows []snmp.Varbind, pvids map[int32]bool) []domain.DeviceVLAN {
 	seen := make(map[int32]bool)
 	var out []domain.DeviceVLAN
 
-	for _, vb := range staticRows {
+	for _, vb := range append(append([]snmp.Varbind(nil), vtpRows...), staticRows...) {
 		if len(vb.Suffix) == 0 {
 			continue
 		}

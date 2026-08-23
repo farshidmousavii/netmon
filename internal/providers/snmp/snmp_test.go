@@ -379,7 +379,7 @@ func TestBuildVLANsUnionSorted(t *testing.T) {
 		{Suffix: []int{10}, Value: octet("users")},
 		{Suffix: []int{1}, Value: octet("default")},
 	}
-	got := buildVLANs(static, map[int32]bool{99: true, 10: true})
+	got := buildVLANs(nil, static, map[int32]bool{99: true, 10: true})
 	if len(got) != 4 {
 		t.Fatalf("got %+v, want 4 vlans", got)
 	}
@@ -686,5 +686,59 @@ func TestOctetStringPtrSanitizesAgentBytes(t *testing.T) {
 	}
 	if octetStringPtr([]byte{0x00, 0x00}) != nil {
 		t.Error("all-NUL octets should yield nil")
+	}
+}
+
+func TestRunVTPDiscoveryDrivesPerVlanMACWalk(t *testing.T) {
+	// The real-deployment shape: Q-BRIDGE answers nothing without
+	// community@vlan contexts, so VTP is the only VLAN source — and its
+	// output must seed task-4b's BRIDGE-MIB loop in the same poll.
+	c := fixtureClient()
+	c.fdb = map[string][]snmp.Varbind{
+		oidVtpVlanName: {
+			{OID: oidVtpVlanName + ".1.10", Suffix: []int{1, 10}, Value: octet("users")},
+			{OID: oidVtpVlanName + ".1.20", Suffix: []int{1, 20}, Value: octet("voice")},
+		},
+	}
+	h := newHarness(t, c)
+
+	// VLAN 10 (from VTP) gets a BRIDGE-MIB client holding one MAC on
+	// bridge port 1 -> ifIndex 1.
+	h.addVlanClient("public@10", &fakeClient{fdb: map[string][]snmp.Varbind{
+		oidDot1dTpFdbPort:     {{Suffix: macSuffix("00:11:22:33:44:07"), Value: 1}},
+		oidDot1dBasePortIfIdx: {{Suffix: []int{1}, Value: 1}},
+	}})
+	// VLAN 20: empty table (legitimately quiet).
+
+	res, err := h.p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// 3 interfaces + 3 VLANs (10 users, 20 voice, 99 PVID) + 1 MAC.
+	if res.ItemsFound != 7 {
+		t.Errorf("ItemsFound = %d, want 7", res.ItemsFound)
+	}
+
+	ctx := context.Background()
+	var vlans int
+	var vlanNames int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*), count(name) FROM device_vlans`).Scan(&vlans, &vlanNames); err != nil {
+		t.Fatal(err)
+	}
+	if vlans != 3 || vlanNames < 2 {
+		t.Errorf("vlans = %d/%d named, want 3 with VTP names present", vlans, vlanNames)
+	}
+
+	// The chain's real assertion: a MAC landed via the VTP-seeded walk.
+	var mac, iface string
+	if err := h.pool.QueryRow(ctx, `
+		SELECT m.mac_address::text, i.if_name
+		FROM mac_table_current m JOIN device_interfaces i ON i.id = m.interface_id`).
+		Scan(&mac, &iface); err != nil {
+		t.Fatalf("no MAC row from the VTP-driven walk: %v", err)
+	}
+	if mac != "00:11:22:33:44:07" || iface != "Gi1/0/1" {
+		t.Errorf("mac row = %s on %s", mac, iface)
 	}
 }
