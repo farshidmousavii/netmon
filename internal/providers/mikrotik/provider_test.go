@@ -79,6 +79,7 @@ type harness struct {
 	p              *Provider
 	now            time.Time
 	seq            int
+	deviceID       int64
 	profileID      int64
 	enc            *crypto.Encryptor
 	lastDialedPort int
@@ -131,32 +132,36 @@ func newHarness(t *testing.T, ros *fakeROS, stats *fakeStats) *harness {
 
 // addDevice seeds one enabled mikrotik_routeros device. An empty password
 // leaves the RouterOS credentials unset.
-func (h *harness) addDevice(t *testing.T, name, password string) {
+func (h *harness) addDevice(t *testing.T, name, password string) int64 {
 	t.Helper()
 	h.seq++
 	ip := fmt.Sprintf("192.0.2.%d", 10+h.seq)
+	var id int64
 	if password != "" {
 		pwEnc, err := h.enc.Encrypt([]byte(password))
 		if err != nil {
 			t.Fatalf("encrypt password: %v", err)
 		}
-		if _, err := h.pool.Exec(context.Background(), `
+		if err := h.pool.QueryRow(context.Background(), `
 			INSERT INTO network_devices
 			    (name, protocol_family, role, mgmt_ip, enabled, snmp_profile_id,
 			     routeros_username, routeros_password_enc)
-			VALUES ($1, 'mikrotik_routeros', 'unassigned', $2::inet, true, $3, 'admin', $4)`,
-			name, ip, h.profileID, pwEnc); err != nil {
+			VALUES ($1, 'mikrotik_routeros', 'unassigned', $2::inet, true, $3, 'admin', $4)
+			RETURNING id`, name, ip, h.profileID, pwEnc).Scan(&id); err != nil {
 			t.Fatalf("seed device %s: %v", name, err)
 		}
-		return
+		h.deviceID = id
+		return id
 	}
-	if _, err := h.pool.Exec(context.Background(), `
+	if err := h.pool.QueryRow(context.Background(), `
 		INSERT INTO network_devices
 		    (name, protocol_family, role, mgmt_ip, enabled, snmp_profile_id)
-		VALUES ($1, 'mikrotik_routeros', 'unassigned', $2::inet, true, $3)`,
-		name, ip, h.profileID); err != nil {
+		VALUES ($1, 'mikrotik_routeros', 'unassigned', $2::inet, true, $3)
+		RETURNING id`, name, ip, h.profileID).Scan(&id); err != nil {
 		t.Fatalf("seed device %s: %v", name, err)
 	}
+	h.deviceID = id
+	return id
 }
 
 func TestRunPollsEvidenceAndPresence(t *testing.T) {
@@ -323,5 +328,29 @@ func TestDialUsesResolvedRouterOSPort(t *testing.T) {
 	}
 	if h.lastDialedPort != 8728 {
 		t.Errorf("dialed port = %d, want 8728 (column default)", h.lastDialedPort)
+	}
+}
+
+func TestPollDeviceByID(t *testing.T) {
+	ros := &fakeROS{
+		arps: []ARP{{Address: mustAddr(t, "192.0.2.60"), MAC: mustMAC(t, "02:aa:00:00:00:01"), Interface: "bridge-lan"}},
+	}
+	h := newHarness(t, ros, &fakeStats{})
+	devID := h.addDevice(t, "ros-queue", "secret")
+
+	if err := h.p.PollDeviceByID(context.Background(), devID); err != nil {
+		t.Fatalf("PollDeviceByID: %v", err)
+	}
+	var evidence int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM mikrotik_leases WHERE device_id = $1 AND source='arp'`, devID).Scan(&evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence != 1 {
+		t.Errorf("arp evidence = %d, want 1", evidence)
+	}
+
+	if err := h.p.PollDeviceByID(context.Background(), 999999); err == nil {
+		t.Error("unknown id: expected error")
 	}
 }

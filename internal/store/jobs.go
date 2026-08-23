@@ -97,23 +97,28 @@ func (s *Store) CompleteJob(ctx context.Context, id int64, owner string, now tim
 	return nil
 }
 
-// FailJob records a failure and requeues the job for retryAt (the
-// caller's backoff policy decides when — and whether retry attempts are
-// exhausted, via the circuit breaker reading network_devices instead).
-// The attempt counter was incremented at claim time, so it reflects
-// every start, successful or not.
-func (s *Store) FailJob(ctx context.Context, id int64, owner, errorMessage string, retryAt time.Time) error {
+// FinishJob closes a leased job with its terminal outcome: succeeded
+// when errorMessage is nil, failed otherwise. Retries are not the job's
+// business — the enqueue-side circuit breaker decides when the next job
+// for the same target becomes due, reading the device's
+// consecutive_failures. The attempt counter (incremented at claim time)
+// still records every start, including lease-expiry reclaims.
+func (s *Store) FinishJob(ctx context.Context, id int64, owner string, errorMessage *string, now time.Time) error {
+	status := "succeeded"
+	if errorMessage != nil {
+		status = "failed"
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE discovery_jobs SET
-		    status = 'queued', scheduled_at = $3, error_message = $4,
+		    status = $3, finished_at = $4, error_message = $5,
 		    lease_owner = NULL, lease_expires_at = NULL
 		WHERE id = $1 AND status = 'running' AND lease_owner = $2`,
-		id, owner, retryAt, errorMessage)
+		id, owner, status, now, errorMessage)
 	if err != nil {
-		return fmt.Errorf("fail discovery job %d: %w", id, err)
+		return fmt.Errorf("finish discovery job %d: %w", id, err)
 	}
 	if tag.RowsAffected() != 1 {
-		return fmt.Errorf("fail discovery job %d: %w", id, ErrNotFound)
+		return fmt.Errorf("finish discovery job %d: %w", id, ErrNotFound)
 	}
 	return nil
 }

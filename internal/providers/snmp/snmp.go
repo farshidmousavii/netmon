@@ -135,6 +135,20 @@ func (p *Provider) Run(ctx context.Context) (providers.Result, error) {
 	return providers.Result{ItemsFound: total}, nil
 }
 
+// PollDeviceByID polls one device by id — the discovery_jobs executor
+// entry point (Phase 2 queue). Run remains the aggregate form.
+func (p *Provider) PollDeviceByID(ctx context.Context, deviceID int64) error {
+	dev, err := p.store.GetDeviceByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("load device: %w", err)
+	}
+	if !dev.Enabled {
+		return fmt.Errorf("device %d is disabled", deviceID)
+	}
+	_, err = p.pollDevice(ctx, *dev, p.now().UTC())
+	return err
+}
+
 // pollDevice collects system info, interfaces, and VLANs from one device.
 // Returns the number of items found (interfaces + VLANs).
 func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.Time) (int, error) {

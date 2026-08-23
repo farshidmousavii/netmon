@@ -60,6 +60,11 @@ type Device struct {
 	RouterOSUsername    string // MikroTik API auth (Phase 2 device polling)
 	RouterOSPasswordEnc []byte // encrypted at rest; decrypt via internal/crypto
 	RouterOSPort        int32  // API port; NULL in DB reads as the 8728 default
+
+	// Poll health (Phase 2 queue): LastPollAt drives due-ness, the
+	// failure counter drives the circuit-breaker backoff multiplier.
+	LastPollAt          *time.Time
+	ConsecutiveFailures int
 }
 
 // SNMPProfile is one row of snmp_profiles — read-only SNMP credentials,

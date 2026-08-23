@@ -113,6 +113,25 @@ func (s *Store) resolveDeviceID(ctx context.Context, nameOrIP string) (int64, er
 	return id, nil
 }
 
+// GetDeviceByID returns one device by id, or ErrNotFound. Same column
+// set as ListEnabledDevicesByFamily — the queue executors' loader.
+func (s *Store) GetDeviceByID(ctx context.Context, id int64) (*domain.Device, error) {
+	var d domain.Device
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
+		       coalesce(routeros_username, ''), routeros_password_enc,
+		       coalesce(routeros_port, 8728),
+		       last_poll_at, consecutive_failures
+		FROM network_devices WHERE id = $1`, id).Scan(&d.ID, &d.Name, &d.MgmtIP, &d.ProtocolFamily, &d.Role,
+		&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec,
+		&d.RouterOSUsername, &d.RouterOSPasswordEnc, &d.RouterOSPort,
+		&d.LastPollAt, &d.ConsecutiveFailures)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return &d, nil
+}
+
 // SetDeviceRouterOSAuth stores a MikroTik device's RouterOS API
 // credentials (password already encrypted by the caller) and optionally
 // its API port (nil leaves the stored value unchanged). Only
@@ -195,7 +214,8 @@ func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) (
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
 		       coalesce(routeros_username, ''), routeros_password_enc,
-		       coalesce(routeros_port, 8728)
+		       coalesce(routeros_port, 8728),
+		       last_poll_at, consecutive_failures
 		FROM network_devices
 		WHERE protocol_family = $1 AND enabled = true
 		ORDER BY name`, family)
@@ -209,7 +229,8 @@ func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) (
 		var d domain.Device
 		if err := rows.Scan(&d.ID, &d.Name, &d.MgmtIP, &d.ProtocolFamily, &d.Role,
 			&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec,
-			&d.RouterOSUsername, &d.RouterOSPasswordEnc, &d.RouterOSPort); err != nil {
+			&d.RouterOSUsername, &d.RouterOSPasswordEnc, &d.RouterOSPort,
+			&d.LastPollAt, &d.ConsecutiveFailures); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}
 		devices = append(devices, d)

@@ -401,42 +401,41 @@ func TestDiscoveryJobLifecycle(t *testing.T) {
 		t.Fatalf("second claim err = %v, want ErrNotFound", err)
 	}
 
-	// Failure requeues with backoff and keeps the attempt count.
-	retryAt := base.Add(2 * time.Minute)
-	if err := st.FailJob(ctx, id, "worker-1", "fixture failure", retryAt); err != nil {
-		t.Fatalf("fail job: %v", err)
+	// Terminal failure: outcome recorded on the job; retries belong to
+	// the enqueue-side circuit breaker, not the job.
+	failAt := base.Add(2 * time.Minute)
+	if err := st.FinishJob(ctx, id, "worker-1", strPtr("fixture failure"), failAt); err != nil {
+		t.Fatalf("finish job (failure): %v", err)
 	}
 	var status, errMsg string
-	var scheduledAt time.Time
 	if err := st.pool.QueryRow(ctx,
-		`SELECT status, error_message, scheduled_at FROM discovery_jobs WHERE id = $1`, id).
-		Scan(&status, &errMsg, &scheduledAt); err != nil {
+		`SELECT status, error_message FROM discovery_jobs WHERE id = $1`, id).
+		Scan(&status, &errMsg); err != nil {
 		t.Fatal(err)
 	}
-	if status != "queued" || errMsg != "fixture failure" || !scheduledAt.Equal(retryAt) {
-		t.Errorf("failed job = %s/%s/%v", status, errMsg, scheduledAt)
+	if status != "failed" || errMsg != "fixture failure" {
+		t.Errorf("failed job = %s/%s", status, errMsg)
 	}
 
-	// Not due before retryAt...
-	if _, err := st.ClaimDueJob(ctx, "worker-2", 5*time.Minute, retryAt.Add(-time.Second)); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("early claim err = %v, want ErrNotFound", err)
+	// A failed job no longer blocks enqueues: a fresh cycle gets a new
+	// job, which completes successfully.
+	id2, enqueued, err := st.EnqueueJob(ctx, "snmp", "device", &dev, failAt)
+	if err != nil || !enqueued || id2 == id {
+		t.Fatalf("re-enqueue: id=%d enqueued=%v err=%v", id2, enqueued, err)
 	}
-	// ...due after retryAt, with the incremented attempt.
-	j2, err := st.ClaimDueJob(ctx, "worker-2", 5*time.Minute, retryAt)
+	j3, err := st.ClaimDueJob(ctx, "worker-3", 5*time.Minute, failAt)
 	if err != nil {
-		t.Fatalf("retry claim: %v", err)
+		t.Fatalf("claim second cycle: %v", err)
 	}
-	if j2.ID != id || j2.Attempt != 2 {
-		t.Errorf("retry claim = %+v, want same id, attempt 2", j2)
+	if j3.ID != id2 || j3.Attempt != 1 {
+		t.Errorf("second cycle = %+v, want fresh job, attempt 1", j3)
 	}
-
-	// Success closes it out.
-	if err := st.CompleteJob(ctx, id, "worker-2", retryAt.Add(time.Minute)); err != nil {
+	if err := st.CompleteJob(ctx, id2, "worker-3", failAt.Add(time.Minute)); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	var fin string
 	if err := st.pool.QueryRow(ctx,
-		`SELECT status FROM discovery_jobs WHERE id = $1`, id).Scan(&fin); err != nil {
+		`SELECT status FROM discovery_jobs WHERE id = $1`, id2).Scan(&fin); err != nil {
 		t.Fatal(err)
 	}
 	if fin != "succeeded" {

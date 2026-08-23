@@ -89,6 +89,8 @@ type harness struct {
 	p    *Provider
 	now  time.Time
 	seq  int
+	// deviceID is the last seeded device's row id (PollDeviceByID tests).
+	deviceID int64
 	// defaultClient answers any dial without an explicit override;
 	// dialErr routes specific targets to failure instead.
 	defaultClient snmpClient
@@ -158,17 +160,20 @@ func newHarness(t *testing.T, defaultClient snmpClient) *harness {
 }
 
 // addDevice seeds one enabled cisco_snmp device and returns its mgmt_ip
-// (the dial target).
+// (the dial target). The row id lands on h.deviceID for PollDeviceByID
+// tests.
 func (h *harness) addDevice(t *testing.T, name string) string {
 	t.Helper()
 	h.seq++
 	ip := fmt.Sprintf("192.0.2.%d", 10+h.seq)
-	if _, err := h.pool.Exec(context.Background(), `
+	var id int64
+	if err := h.pool.QueryRow(context.Background(), `
 		INSERT INTO network_devices (name, protocol_family, role, mgmt_ip, enabled, snmp_profile_id)
-		VALUES ($1, 'cisco_snmp', 'unassigned', $2::inet, true, $3)`,
-		name, ip, h.profileID); err != nil {
+		VALUES ($1, 'cisco_snmp', 'unassigned', $2::inet, true, $3) RETURNING id`,
+		name, ip, h.profileID).Scan(&id); err != nil {
 		t.Fatalf("seed device %s: %v", name, err)
 	}
+	h.deviceID = id
 	return ip
 }
 
@@ -629,5 +634,33 @@ func TestParseNeighborAddresses(t *testing.T) {
 	}
 	if parseIANAAddress([]byte{9, 1, 2, 3, 4}) != nil {
 		t.Error("unknown address family should yield nil")
+	}
+}
+
+func TestPollDeviceByID(t *testing.T) {
+	h := newHarness(t, fixtureClient())
+
+	if err := h.p.PollDeviceByID(context.Background(), h.deviceID); err != nil {
+		t.Fatalf("PollDeviceByID: %v", err)
+	}
+	var ifaces int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM device_interfaces WHERE device_id = $1`, h.deviceID).Scan(&ifaces); err != nil {
+		t.Fatal(err)
+	}
+	if ifaces != 3 {
+		t.Errorf("interfaces = %d, want 3", ifaces)
+	}
+
+	// Unknown and disabled ids are clear errors, not silent no-ops.
+	if err := h.p.PollDeviceByID(context.Background(), 999999); err == nil {
+		t.Error("unknown id: expected error")
+	}
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE network_devices SET enabled = false WHERE id = $1`, h.deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.p.PollDeviceByID(context.Background(), h.deviceID); err == nil {
+		t.Error("disabled device: expected error")
 	}
 }

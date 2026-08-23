@@ -48,6 +48,19 @@ const (
 	// (Go duration, default 5m).
 	DHCPInterval = "BIDAR_DHCP_INTERVAL"
 
+	// JobWorkers is the Phase 2 polling queue's worker count
+	// (discovery_jobs consumers).
+	JobWorkers = "BIDAR_JOB_WORKERS"
+
+	// EnqueueInterval is how often the queue's enqueue pass runs — it
+	// checks every enabled device against its poll interval and the
+	// circuit-breaker backoff, enqueuing due ones.
+	EnqueueInterval = "BIDAR_ENQUEUE_INTERVAL"
+
+	// JobLease bounds one claimed job: a worker crashing mid-poll leaves
+	// the lease to expire, making the job claimable again.
+	JobLease = "BIDAR_JOB_LEASE"
+
 	// ICMPInterval is how often the ICMP sweep runs (Go duration,
 	// default 5m).
 	ICMPInterval = "BIDAR_ICMP_INTERVAL"

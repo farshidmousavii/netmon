@@ -159,6 +159,20 @@ func (p *Provider) Run(ctx context.Context) (providers.Result, error) {
 
 const familyMikrotik = "mikrotik_routeros"
 
+// PollDeviceByID polls one device by id — the discovery_jobs executor
+// entry point (Phase 2 queue). Run remains the aggregate form.
+func (p *Provider) PollDeviceByID(ctx context.Context, deviceID int64) error {
+	dev, err := p.store.GetDeviceByID(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("load device: %w", err)
+	}
+	if !dev.Enabled {
+		return fmt.Errorf("device %d is disabled", deviceID)
+	}
+	_, err = p.pollDevice(ctx, *dev, p.now().UTC())
+	return err
+}
+
 // pollDevice collects one device's ARP + wireless evidence and
 // best-effort SNMP stats.
 func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.Time) (int, error) {
