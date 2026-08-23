@@ -40,21 +40,22 @@ const (
 	oidDot1qTpFdbPort     = "1.3.6.1.2.1.17.7.1.2.2.1.1" // Q-BRIDGE dot1qTpFdbPort; suffix: vlan + 6 MAC octets
 )
 
-// interfaceCols is the column order buildDeviceInterfaces expects; pass
-// it to WalkTableColumns verbatim.
-var interfaceCols = []string{
+// InterfaceCols is the column order BuildDeviceInterfaces expects; pass
+// it to WalkTableColumns verbatim. Exported for sibling providers
+// (MikroTik SNMP stats) polling the same IF-MIB shape.
+var InterfaceCols = []string{
 	oidIfName, oidIfDescr, oidIfPhysAddr,
 	oidIfAdmin, oidIfOper, oidIfLastChange, oidDot1qPvid,
 }
 
 const (
-	colIfName = iota
-	colIfDescr
-	colIfPhysAddr
-	colIfAdmin
-	colIfOper
-	colIfLastChange
-	colPvid
+	ColIfName = iota
+	ColIfDescr
+	ColIfPhysAddr
+	ColIfAdmin
+	ColIfOper
+	ColIfLastChange
+	ColPvid
 	colCount
 )
 
@@ -130,7 +131,7 @@ func intValue(v any) (int64, bool) {
 	}
 }
 
-func sysUpTimeTicks(sys []snmp.Varbind) (uint32, bool) {
+func SysUpTimeTicks(sys []snmp.Varbind) (uint32, bool) {
 	for _, vb := range sys {
 		if vb.OID == oidSysUpTime {
 			if n, ok := vb.Value.(uint32); ok {
@@ -141,7 +142,7 @@ func sysUpTimeTicks(sys []snmp.Varbind) (uint32, bool) {
 	return 0, false
 }
 
-func sysDescrText(sys []snmp.Varbind) string {
+func SysDescrText(sys []snmp.Varbind) string {
 	for _, vb := range sys {
 		if vb.OID == oidSysDescr {
 			if b, ok := vb.Value.([]byte); ok {
@@ -163,12 +164,12 @@ func sysNameText(sys []snmp.Varbind) string {
 	return ""
 }
 
-// buildDeviceInterfaces joins one WalkTableColumns result (columns in
-// interfaceCols order) into domain rows. pvids collects every access-port
+// BuildDeviceInterfaces joins one WalkTableColumns result (columns in
+// InterfaceCols order) into domain rows. pvids collects every access-port
 // PVID seen, feeding the VLAN union. ifLastChange is converted from
 // boot-relative TimeTicks to absolute time using the sysUpTime anchor
 // read in the same poll; anything inconsistent stays NULL.
-func buildDeviceInterfaces(rows []snmp.TableRow, sysUpTime uint32, hasUpTime bool, now time.Time) ([]domain.DeviceInterface, map[int32]bool) {
+func BuildDeviceInterfaces(rows []snmp.TableRow, sysUpTime uint32, hasUpTime bool, now time.Time) ([]domain.DeviceInterface, map[int32]bool) {
 	out := make([]domain.DeviceInterface, 0, len(rows))
 	pvids := make(map[int32]bool)
 
@@ -184,23 +185,24 @@ func buildDeviceInterfaces(rows []snmp.TableRow, sysUpTime uint32, hasUpTime boo
 			}
 			return r.Values[col]
 		}
+		_ = colCount
 
-		iface.IfName = octetStringPtr(val(colIfName))
-		iface.IfDesc = octetStringPtr(val(colIfDescr))
-		if m, ok := macValue(val(colIfPhysAddr)); ok {
+		iface.IfName = octetStringPtr(val(ColIfName))
+		iface.IfDesc = octetStringPtr(val(ColIfDescr))
+		if m, ok := macValue(val(ColIfPhysAddr)); ok {
 			iface.MAC = &m
 		}
-		iface.AdminStatus = statusString(val(colIfAdmin))
-		iface.OperStatus = statusString(val(colIfOper))
+		iface.AdminStatus = statusString(val(ColIfAdmin))
+		iface.OperStatus = statusString(val(ColIfOper))
 
-		if lcRaw := val(colIfLastChange); lcRaw != nil {
+		if lcRaw := val(ColIfLastChange); lcRaw != nil {
 			if lc, ok := lcRaw.(uint32); ok && hasUpTime && lc <= sysUpTime {
 				t := now.Add(-time.Duration(sysUpTime-lc) * 10 * time.Millisecond)
 				iface.LastChangeAt = &t
 			}
 		}
 
-		if pvRaw := val(colPvid); pvRaw != nil {
+		if pvRaw := val(ColPvid); pvRaw != nil {
 			if n, ok := intValue(pvRaw); ok && n > 0 && n <= 4094 {
 				p := int32(n)
 				iface.PVID = &p

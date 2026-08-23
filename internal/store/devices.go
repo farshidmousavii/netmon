@@ -145,7 +145,8 @@ func (s *Store) ListCoreDevices(ctx context.Context) ([]domain.Device, error) {
 // it is an ARP-collector-only concept.
 func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) ([]domain.Device, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec
+		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
+		       coalesce(routeros_username, ''), routeros_password_enc
 		FROM network_devices
 		WHERE protocol_family = $1 AND enabled = true
 		ORDER BY name`, family)
@@ -158,7 +159,8 @@ func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) (
 	for rows.Next() {
 		var d domain.Device
 		if err := rows.Scan(&d.ID, &d.Name, &d.MgmtIP, &d.ProtocolFamily, &d.Role,
-			&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec); err != nil {
+			&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec,
+			&d.RouterOSUsername, &d.RouterOSPasswordEnc); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}
 		devices = append(devices, d)

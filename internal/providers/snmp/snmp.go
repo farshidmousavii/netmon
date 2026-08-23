@@ -163,8 +163,8 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 	if err != nil {
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("read system info: %w", err))
 	}
-	upTimeTicks, hasUpTime := sysUpTimeTicks(sys)
-	if fw := parseFirmwareVersion(sysDescrText(sys)); fw != "" {
+	upTimeTicks, hasUpTime := SysUpTimeTicks(sys)
+	if fw := parseFirmwareVersion(SysDescrText(sys)); fw != "" {
 		// Best-effort enrichment; a storage hiccup must not fail the poll.
 		if err := p.store.UpdateDeviceFirmwareVersion(ctx, dev.ID, fw); err != nil {
 			p.logger.Warn("snmp: could not store firmware version", "device_id", dev.ID, "err", err)
@@ -175,11 +175,11 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 	}
 
 	// Interfaces: IF-MIB columns joined by ifIndex.
-	rows, err := client.WalkTableColumns(ctx, interfaceCols...)
+	rows, err := client.WalkTableColumns(ctx, InterfaceCols...)
 	if err != nil {
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("walk interface table: %w", err))
 	}
-	ifaces, pvids := buildDeviceInterfaces(rows, upTimeTicks, hasUpTime, now)
+	ifaces, pvids := BuildDeviceInterfaces(rows, upTimeTicks, hasUpTime, now)
 	ifaceIDs, err := p.store.UpsertDeviceInterfaces(ctx, dev.ID, ifaces, now)
 	if err != nil {
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("store interfaces: %w", err))

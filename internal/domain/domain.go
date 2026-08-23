@@ -49,14 +49,16 @@ type Observation struct {
 // by the ARP collector (role=core) and Phase 2 polling. PollIntervalSec
 // drives Phase 2's discovery_jobs enqueue cadence.
 type Device struct {
-	ID              int64
-	Name            string
-	MgmtIP          netip.Addr
-	ProtocolFamily  string
-	Role            string
-	Enabled         bool
-	SNMPProfileID   *int64
-	PollIntervalSec int
+	ID                  int64
+	Name                string
+	MgmtIP              netip.Addr
+	ProtocolFamily      string
+	Role                string
+	Enabled             bool
+	SNMPProfileID       *int64
+	PollIntervalSec     int
+	RouterOSUsername    string // MikroTik API auth (Phase 2 device polling)
+	RouterOSPasswordEnc []byte // encrypted at rest; decrypt via internal/crypto
 }
 
 // SNMPProfile is one row of snmp_profiles — read-only SNMP credentials,
