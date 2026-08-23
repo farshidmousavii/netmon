@@ -101,8 +101,9 @@ Discover the network devices themselves (Cisco switches + MikroTik routers) and 
 
 **SNMP Provider (Cisco)**
 - SNMPv3 preferred, v2c fallback, configured per-device (`snmp_profiles`).
-- Polls: system info, interfaces (`IF-MIB`/`ifXTable`), VLANs, MAC table (`BRIDGE-MIB`/`Q-BRIDGE-MIB`), LLDP/CDP neighbors.
-- Poll interval configurable per device, default 10 minutes.
+- Polls: system info (`sysDescr`/`sysName`/`sysUpTime` — version parsed into `firmware_version`), interfaces (`IF-MIB` ifXTable+ifTable joined by ifIndex), VLANs (**Cisco VTP `vtpVlanName` primary** — standard IOS answers it without `community@vlan` contexts; Q-BRIDGE static names and access-port PVIDs remain in the union), MAC table (`BRIDGE-MIB` walked per discovered VLAN under `community@vlan`, Q-BRIDGE single-walk fallback), LLDP/CDP neighbors (remote system name, port id, and management IP captured — Phase 3's uplink-walk input).
+- Devices tagged `function = 'router'` skip the MAC-table step entirely: routers don't keep per-VLAN bridge tables, so the walks are not-applicable rather than failures; interfaces/VLANs/neighbors still run for them.
+- Poll interval configurable per device (`poll_interval_sec`, default 600), plus a per-device RouterOS API port (`routeros_port`, default 8728) for the MikroTik side.
 
 **MikroTik Provider (extends the client built in Phase 1)**
 - Phase 1's DHCP collector already built an `internal/providers/mikrotik` RouterOS API client for lease reads. Phase 2 extends that same package — it does not add a second, separate MikroTik integration.
@@ -110,9 +111,9 @@ Discover the network devices themselves (Cisco switches + MikroTik routers) and 
 - Result: one MikroTik client package, growing in capability phase by phase, always talking to the device one way.
 
 ### Polling architecture (no broker, Postgres-backed)
-- A `discovery_jobs` table holds scheduled/queued/running/failed jobs.
-- A scheduler goroutine enqueues due jobs; a worker pool (configurable size, default 5) claims jobs via a single `UPDATE ... WHERE id = ... AND status = 'queued' RETURNING ...` statement, which acts as the lease.
-- Retry with exponential backoff. After N consecutive failures a device is marked unhealthy and polling frequency backs off (circuit breaker) — visible via the device's `last_error`/`consecutive_failures` fields.
+- A `discovery_jobs` table holds queued/running/succeeded/failed jobs; all state lives there, so the queue is resumable across restarts (a crashed worker's lease expires and the job is reclaimable).
+- An enqueue pass (`BIDAR_ENQUEUE_INTERVAL`, default 1m) checks every enabled device against its interval and enqueues due ones (deduped against active jobs); a worker pool (`BIDAR_JOB_WORKERS`, default 5) claims via a single `UPDATE ... WHERE ... FOR UPDATE SKIP LOCKED` statement, which acts as the lease (`BIDAR_JOB_LEASE`, default 10m).
+- Jobs are terminal — succeeded or failed; retries belong to the enqueue side. After 5 consecutive failures a device's effective interval doubles per extra failure, capped at 1h, resetting on success (circuit breaker) — visible via the device's `last_error`/`consecutive_failures` fields, which the providers own.
 
 ### What Phase 2 delivers
 - Full switch/router inventory: interfaces, VLANs, MAC tables, LLDP/CDP neighbors — current + history.

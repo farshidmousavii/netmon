@@ -167,7 +167,7 @@ Raw evidence log — every provider writes here; `hosts` is a derived projection
 CREATE TABLE host_observations (
     id           BIGSERIAL PRIMARY KEY,
     host_id      bigint REFERENCES hosts(id),   -- nullable until matched
-    source       text NOT NULL,                 -- ad | arp | dhcp | icmp
+    source       text NOT NULL,                 -- ad | arp | dhcp | icmp | mikrotik
     hostname     text,
     ip           inet,
     mac          macaddr,
@@ -187,7 +187,7 @@ One generic run log covering all four Phase 1 collectors (AD, ARP, DHCP, ICMP). 
 ```sql
 CREATE TABLE provider_runs (
     id            BIGSERIAL PRIMARY KEY,
-    provider      text NOT NULL,     -- ad | arp | dhcp | icmp
+    provider      text NOT NULL,     -- snmp | mikrotik (Phase 2 queue); ad/arp/dhcp/icmp stay loop-scheduled
     target_type   text,              -- domain | device | dhcp_source | subnet (nullable: AD sync has no target)
     target_id     bigint,
     status        text NOT NULL,     -- running | succeeded | failed

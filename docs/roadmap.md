@@ -141,6 +141,13 @@ DoD:
 - MAC tables, interfaces, VLANs, and neighbors are populated and refreshing.
 - No endpoint-to-port mapping yet — verify this phase's data is trustworthy on its own before Phase 3 consumes it.
 
+**Status: built, wired, and running on real infrastructure.** All five tasks shipped and verified against the live network (41 Cisco switches + 27 MikroTik devices): per-cycle evidence on the real deployment reads 1,986 interfaces, 466 VLANs (26 distinct, VTP-named), ~5,900 MAC-table entries (651 unique MACs across 37 switches), and 161 CDP neighbor links — with per-device health (`last_error`/`consecutive_failures`) driving the decision-E circuit breaker live. DoD notes against reality:
+
+- *Polling successfully*: all 41 Cisco switches green. The 27 MikroTiks await operator credentials via `bidar devices set-routeros-auth` (shipped this phase); until then they fail with that exact message and back off automatically — visible, not silent.
+- *Failures visible and isolated*: proven live — first-contact data bugs (invalid UTF-8, embedded NUL bytes in real CDP cache fields) failed only the affected step/device while every other device kept polling; both fixed and pinned by tests.
+- *Populated and refreshing*: interfaces/neighbors/MACs yes; VLAN discovery needed one amendment — standard IOS answers neither Q-BRIDGE static names nor dot1qPvid without `community@vlan` contexts, so CISCO-VTP-MIB `vtpVlanName` joined as the primary source (commit noted in history). Router-function devices (4 voice gateways/ISRs) skip MAC polling entirely as not-applicable — routers don't keep per-VLAN bridge tables; everything else still runs for them.
+- Known limitation tracked in §Backlog: SNMPv3 profiles get no per-VLAN BRIDGE-MIB walk (the `@vlan` trick is v2c-only); they fall to Q-BRIDGE where supported.
+
 ---
 
 ## Phase 3 — Correlation / mapping
