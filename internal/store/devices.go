@@ -63,7 +63,17 @@ func (s *Store) SetDeviceRole(ctx context.Context, nameOrIP, role string) (int64
 	if !ValidDeviceRoles[role] {
 		return 0, fmt.Errorf("invalid role %q (use core, access or unassigned)", role)
 	}
+	id, err := s.resolveDeviceID(ctx, nameOrIP)
+	if err != nil {
+		return 0, err
+	}
+	return s.updateDeviceRole(ctx, id, role)
+}
 
+// resolveDeviceID matches a device by exact name (case-insensitive,
+// must be unambiguous) or by mgmt_ip — the shared lookup behind the
+// admin CLI's per-device setters.
+func (s *Store) resolveDeviceID(ctx context.Context, nameOrIP string) (int64, error) {
 	// Exact-name match first (must be unique).
 	rows, err := s.pool.Query(ctx, `SELECT id, name FROM network_devices WHERE lower(name) = lower($1)`, nameOrIP)
 	if err != nil {
@@ -87,7 +97,7 @@ func (s *Store) SetDeviceRole(ctx context.Context, nameOrIP, role string) (int64
 		return 0, fmt.Errorf("name %q matches %d devices; use the mgmt_ip instead", nameOrIP, len(ids))
 	}
 	if len(ids) == 1 {
-		return s.updateDeviceRole(ctx, ids[0], role)
+		return ids[0], nil
 	}
 
 	// Fall back to mgmt_ip.
@@ -100,7 +110,45 @@ func (s *Store) SetDeviceRole(ctx context.Context, nameOrIP, role string) (int64
 	if err != nil {
 		return 0, notFound(err)
 	}
-	return s.updateDeviceRole(ctx, id, role)
+	return id, nil
+}
+
+// SetDeviceRouterOSAuth stores a MikroTik device's RouterOS API
+// credentials (password already encrypted by the caller) and optionally
+// its API port (nil leaves the stored value unchanged). Only
+// mikrotik_routeros devices accept RouterOS credentials.
+func (s *Store) SetDeviceRouterOSAuth(ctx context.Context, nameOrIP, username string, passwordEnc []byte, port *int32) (int64, error) {
+	if strings.TrimSpace(username) == "" {
+		return 0, fmt.Errorf("routeros username cannot be empty")
+	}
+	id, err := s.resolveDeviceID(ctx, nameOrIP)
+	if err != nil {
+		return 0, err
+	}
+	var family string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT protocol_family FROM network_devices WHERE id = $1`, id).Scan(&family); err != nil {
+		return 0, fmt.Errorf("load device: %w", err)
+	}
+	if family != "mikrotik_routeros" {
+		return 0, fmt.Errorf("device %q is %s, not mikrotik_routeros — RouterOS credentials only apply to MikroTik devices", nameOrIP, family)
+	}
+
+	if port != nil {
+		_, err = s.pool.Exec(ctx, `
+			UPDATE network_devices
+			SET routeros_username = $2, routeros_password_enc = $3, routeros_port = $4, updated_at = now()
+			WHERE id = $1`, id, username, passwordEnc, *port)
+	} else {
+		_, err = s.pool.Exec(ctx, `
+			UPDATE network_devices
+			SET routeros_username = $2, routeros_password_enc = $3, updated_at = now()
+			WHERE id = $1`, id, username, passwordEnc)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("set routeros auth: %w", err)
+	}
+	return id, nil
 }
 
 func (s *Store) updateDeviceRole(ctx context.Context, id int64, role string) (int64, error) {
@@ -146,7 +194,8 @@ func (s *Store) ListCoreDevices(ctx context.Context) ([]domain.Device, error) {
 func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) ([]domain.Device, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
-		       coalesce(routeros_username, ''), routeros_password_enc
+		       coalesce(routeros_username, ''), routeros_password_enc,
+		       coalesce(routeros_port, 8728)
 		FROM network_devices
 		WHERE protocol_family = $1 AND enabled = true
 		ORDER BY name`, family)
@@ -160,7 +209,7 @@ func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) (
 		var d domain.Device
 		if err := rows.Scan(&d.ID, &d.Name, &d.MgmtIP, &d.ProtocolFamily, &d.Role,
 			&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec,
-			&d.RouterOSUsername, &d.RouterOSPasswordEnc); err != nil {
+			&d.RouterOSUsername, &d.RouterOSPasswordEnc, &d.RouterOSPort); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}
 		devices = append(devices, d)

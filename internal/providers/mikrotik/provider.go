@@ -47,10 +47,10 @@ type rosClient interface {
 	Close() error
 }
 
-type dialFunc func(ctx context.Context, host, username, password string) (rosClient, error)
+type dialFunc func(ctx context.Context, host string, port int, username, password string) (rosClient, error)
 
-func realDial(ctx context.Context, host, username, password string) (rosClient, error) {
-	return Dial(ctx, Config{Host: host, Username: username, Password: password})
+func realDial(ctx context.Context, host string, port int, username, password string) (rosClient, error) {
+	return Dial(ctx, Config{Host: host, Port: port, Username: username, Password: password})
 }
 
 // statsClient is the slice of snmp.Client used for best-effort stats.
@@ -170,7 +170,7 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 	if err != nil {
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("decrypt routeros password: %w", err))
 	}
-	c, err := p.dial(ctx, dev.MgmtIP.String(), dev.RouterOSUsername, string(password))
+	c, err := p.dial(ctx, dev.MgmtIP.String(), int(dev.RouterOSPort), dev.RouterOSUsername, string(password))
 	if err != nil {
 		return p.pollFailed(ctx, dev, now, fmt.Errorf("connect %s: %w", dev.MgmtIP, err))
 	}

@@ -4,6 +4,7 @@ package store
 // dhcp-sources list/add). Gated on BIDAR_TEST_DATABASE_URL.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -143,5 +144,68 @@ func TestAddDHCPSource(t *testing.T) {
 	}
 	if len(sources) != 2 {
 		t.Errorf("sources = %d, want 2", len(sources))
+	}
+}
+
+func TestSetDeviceRouterOSAuth(t *testing.T) {
+	st := newAdminStore(t)
+	ctx := context.Background()
+
+	seedDevice(t, st, "ros-auth-me", "192.0.2.60", "mikrotik_routeros", "unassigned", true)
+	seedDevice(t, st, "cisco-nope", "192.0.2.61", "cisco_snmp", "core", true)
+
+	// Happy path: credentials stored (caller encrypts), port untouched.
+	if _, err := st.SetDeviceRouterOSAuth(ctx, "ros-auth-me", "admin", []byte{0x01}, nil); err != nil {
+		t.Fatalf("set auth: %v", err)
+	}
+	var user string
+	var pwEnc []byte
+	var port *int32
+	if err := st.pool.QueryRow(ctx,
+		`SELECT routeros_username, routeros_password_enc, routeros_port
+		 FROM network_devices WHERE name = 'ros-auth-me'`).Scan(&user, &pwEnc, &port); err != nil {
+		t.Fatal(err)
+	}
+	if user != "admin" || len(pwEnc) == 0 {
+		t.Errorf("credentials = %q/%v", user, pwEnc)
+	}
+	if port == nil || *port != 8728 {
+		t.Errorf("port = %v, want column default 8728", port)
+	}
+
+	// Optional port update.
+	p := int32(8729)
+	if _, err := st.SetDeviceRouterOSAuth(ctx, "ros-auth-me", "admin2", []byte{0x02}, &p); err != nil {
+		t.Fatalf("set auth with port: %v", err)
+	}
+	if err := st.pool.QueryRow(ctx,
+		`SELECT routeros_username, routeros_port FROM network_devices WHERE name = 'ros-auth-me'`).
+		Scan(&user, &port); err != nil {
+		t.Fatal(err)
+	}
+	if user != "admin2" || port == nil || *port != 8729 {
+		t.Errorf("after port update: user=%q port=%v", user, port)
+	}
+
+	// Wrong family rejected.
+	if _, err := st.SetDeviceRouterOSAuth(ctx, "cisco-nope", "admin", []byte{0x01}, nil); err == nil ||
+		!bytes.Contains([]byte(err.Error()), []byte("not mikrotik_routeros")) {
+		t.Errorf("cisco device: err = %v, want family rejection", err)
+	}
+
+	// Ambiguous / unknown targets behave like set-role.
+	seedDevice(t, st, "dup", "192.0.2.62", "mikrotik_routeros", "unassigned", true)
+	st.pool.Exec(ctx, `INSERT INTO network_devices (name, protocol_family, role, mgmt_ip, enabled)
+		VALUES ('dup', 'mikrotik_routeros', 'unassigned', '192.0.2.63'::inet, true)`)
+	if _, err := st.SetDeviceRouterOSAuth(ctx, "dup", "a", []byte{1}, nil); err == nil {
+		t.Error("expected error for ambiguous name")
+	}
+	if _, err := st.SetDeviceRouterOSAuth(ctx, "ghost", "a", []byte{1}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown device: err = %v, want ErrNotFound", err)
+	}
+
+	// Empty username rejected.
+	if _, err := st.SetDeviceRouterOSAuth(ctx, "ros-auth-me", "  ", []byte{1}, nil); err == nil {
+		t.Error("expected error for empty username")
 	}
 }

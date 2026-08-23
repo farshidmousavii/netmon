@@ -74,13 +74,14 @@ func (f *fakeStats) WalkTableColumns(_ context.Context, cols ...string) ([]snmpl
 func (f *fakeStats) Close() error { return nil }
 
 type harness struct {
-	pool      *pgxpool.Pool
-	st        *store.Store
-	p         *Provider
-	now       time.Time
-	seq       int
-	profileID int64
-	enc       *crypto.Encryptor
+	pool           *pgxpool.Pool
+	st             *store.Store
+	p              *Provider
+	now            time.Time
+	seq            int
+	profileID      int64
+	enc            *crypto.Encryptor
+	lastDialedPort int
 }
 
 func newHarness(t *testing.T, ros *fakeROS, stats *fakeStats) *harness {
@@ -115,7 +116,10 @@ func newHarness(t *testing.T, ros *fakeROS, stats *fakeStats) *harness {
 
 	p, err := newWithDial(st, enc, slog.Default(),
 		func() time.Time { return h.now },
-		func(_ context.Context, _, _, _ string) (rosClient, error) { return ros, nil },
+		func(_ context.Context, _ string, port int, _, _ string) (rosClient, error) {
+			h.lastDialedPort = port
+			return ros, nil
+		},
 		func(_ context.Context, _ snmplib.Config) (statsClient, error) { return stats, nil },
 	)
 	if err != nil {
@@ -306,3 +310,18 @@ func mustMAC(t *testing.T, s string) net.HardwareAddr {
 }
 
 func octetStr(s string) any { return []byte(s) }
+
+func TestDialUsesResolvedRouterOSPort(t *testing.T) {
+	ros := &fakeROS{
+		arps: []ARP{{Address: mustAddr(t, "192.0.2.60"), MAC: mustMAC(t, "02:aa:00:00:00:01"), Interface: "bridge-lan"}},
+	}
+	h := newHarness(t, ros, &fakeStats{})
+	h.addDevice(t, "ros-port", "secret") // no explicit port -> coalesce default 8728
+
+	if _, err := h.p.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if h.lastDialedPort != 8728 {
+		t.Errorf("dialed port = %d, want 8728 (column default)", h.lastDialedPort)
+	}
+}

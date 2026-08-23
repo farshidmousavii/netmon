@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/farshidmousavii/bidar/internal/crypto"
 	"github.com/farshidmousavii/bidar/internal/db"
 	"github.com/farshidmousavii/bidar/internal/logger"
 	"github.com/farshidmousavii/bidar/internal/store"
@@ -40,12 +42,30 @@ Takes effect on the next scheduled poll cycle — no daemon restart needed
 	Run:  runDevicesSetRole,
 }
 
+var devicesSetRouterOSAuthCmd = &cobra.Command{
+	Use:   "set-routeros-auth <name-or-mgmt_ip> <username> <password>",
+	Short: "Set a MikroTik device's RouterOS API credentials",
+	Long: `Store RouterOS API credentials for a mikrotik_routeros device,
+encrypted at rest with BIDAR_MASTER_KEY. The Phase 2 polling provider
+uses them to read the ARP and wireless tables.
+
+Optional --port overrides the RouterOS API port (default 8728); without
+the flag any previously stored port is left unchanged.
+
+Takes effect on the next scheduled poll cycle — no daemon restart
+needed.`,
+	Args: cobra.ExactArgs(3),
+	Run:  runDevicesSetRouterOSAuth,
+}
+
 func init() {
 	rootCmd.AddCommand(devicesCmd)
 	devicesCmd.AddCommand(devicesListCmd)
 	devicesCmd.AddCommand(devicesSetRoleCmd)
+	devicesCmd.AddCommand(devicesSetRouterOSAuthCmd)
 
 	devicesListCmd.Flags().String("role", "", "filter by role (core|access|unassigned)")
+	devicesSetRouterOSAuthCmd.Flags().Int("port", 0, "RouterOS API port (default: leave unchanged, device default 8728)")
 }
 
 func devicesStore(ctx context.Context) (*store.Store, func()) {
@@ -116,4 +136,48 @@ func runDevicesSetRole(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 	fmt.Printf("device %d (%s): role -> %s\n", id, nameOrIP, role)
+}
+
+func runDevicesSetRouterOSAuth(cmd *cobra.Command, args []string) {
+	if err := logger.Init(false); err != nil {
+		log.Fatal(err)
+	}
+
+	nameOrIP := strings.TrimSpace(args[0])
+	username := strings.TrimSpace(args[1])
+	password := args[2]
+
+	var port *int32
+	if raw := cmd.Flags().Lookup("port").Value.String(); raw != "" && raw != "0" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 || n > 65535 {
+			log.Fatalf("invalid --port %q (use 1-65535)", raw)
+		}
+		p := int32(n)
+		port = &p
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	st, closePool := devicesStore(ctx)
+	defer closePool()
+
+	enc, err := crypto.NewFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	pwEnc, err := enc.Encrypt([]byte(password))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	id, err := st.SetDeviceRouterOSAuth(ctx, nameOrIP, username, pwEnc, port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	msg := fmt.Sprintf("device %d (%s): RouterOS credentials stored for user %q", id, nameOrIP, username)
+	if port != nil {
+		msg += fmt.Sprintf(", port %d", *port)
+	}
+	fmt.Println(msg)
 }

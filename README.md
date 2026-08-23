@@ -89,6 +89,17 @@ docker compose exec bidar /usr/local/bin/bidar dhcp-sources add ros-dhcp mikroti
   --host 192.0.2.12 --username admin --password 'CHANGE_ME'
 ```
 
+   For **Phase 2 device polling** (interfaces/VLANs/MAC tables/neighbors),
+   every MikroTik device also needs RouterOS API credentials on its
+   `network_devices` row — encrypted at rest, picked up on the next poll
+   cycle:
+
+```bash
+docker compose exec bidar /usr/local/bin/bidar devices set-routeros-auth <name-or-ip> admin 'CHANGE_ME'
+# non-standard API port (default 8728):
+docker compose exec bidar /usr/local/bin/bidar devices set-routeros-auth <name-or-ip> admin 'CHANGE_ME' --port 8728
+```
+
 6. **Start the daemon**
 
 ```bash

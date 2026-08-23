@@ -59,6 +59,7 @@ type Device struct {
 	PollIntervalSec     int
 	RouterOSUsername    string // MikroTik API auth (Phase 2 device polling)
 	RouterOSPasswordEnc []byte // encrypted at rest; decrypt via internal/crypto
+	RouterOSPort        int32  // API port; NULL in DB reads as the 8728 default
 }
 
 // SNMPProfile is one row of snmp_profiles — read-only SNMP credentials,

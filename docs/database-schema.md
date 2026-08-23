@@ -92,6 +92,7 @@ CREATE TABLE network_devices (
     ssh_credential_id      bigint REFERENCES ssh_credentials(id),  -- only used by exec/backup/tui-config, never by the daemon
     routeros_username      text,             -- MikroTik API auth (used from Phase 2 on)
     routeros_password_enc  bytea,
+    routeros_port          int DEFAULT 8728, -- API port; NULL/absent reads as 8728 (migration 0005)
     poll_interval_sec      int NOT NULL DEFAULT 600,
     enabled                boolean NOT NULL DEFAULT true,
     last_poll_at           timestamptz,
