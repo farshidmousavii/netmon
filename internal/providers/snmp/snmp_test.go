@@ -742,3 +742,45 @@ func TestRunVTPDiscoveryDrivesPerVlanMACWalk(t *testing.T) {
 		t.Errorf("mac row = %s on %s", mac, iface)
 	}
 }
+
+func TestRouterDevicesSkipMACWalk(t *testing.T) {
+	// A router/voice-gateway must never attempt the MAC walk: if it did,
+	// this fdbErr would fail the poll. Success despite the error proves
+	// the skip — "not applicable", not a failure.
+	c := fixtureClient()
+	c.fdbErr = targetError("bridge walk must not run for routers")
+	h := newHarness(t, c)
+	h.addDevice(t, "voice-gw")
+	if _, err := h.pool.Exec(context.Background(),
+		`UPDATE network_devices SET function = 'router' WHERE name = 'voice-gw'`); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := h.p.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run should succeed for a router (MAC step skipped): %v", err)
+	}
+	// 3 interfaces + 3 VLANs + 0 MACs (skipped) + 0 neighbors (none in
+	// this fixture).
+	if res.ItemsFound != 6 {
+		t.Errorf("ItemsFound = %d, want 6", res.ItemsFound)
+	}
+	var failures int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT consecutive_failures FROM network_devices WHERE name = 'voice-gw'`).Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 0 {
+		t.Errorf("consecutive_failures = %d, want 0 (skip is not a failure)", failures)
+	}
+
+	// A non-router device under identical conditions still fails the MAC
+	// step — the skip is keyed on function, not a blanket amnesty.
+	c2 := fixtureClient()
+	c2.fdbErr = targetError("bridge walk timeout")
+	h2 := newHarness(t, c2)
+	h2.addDevice(t, "switch-same-conditions")
+	if _, err := h2.p.Run(context.Background()); err == nil {
+		t.Error("non-router device should still fail when every MAC source fails")
+	}
+}

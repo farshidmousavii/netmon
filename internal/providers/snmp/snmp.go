@@ -222,18 +222,26 @@ func (p *Provider) pollDevice(ctx context.Context, dev domain.Device, now time.T
 	}
 
 	// MAC table: BRIDGE-MIB per VLAN (community@vlan), Q-BRIDGE fallback.
-	n, err := p.pollMACs(ctx, dev, cfg, ifaceIDs, vlans, now)
-	if err != nil {
-		return p.pollFailed(ctx, dev, now, err)
+	// Routers and voice gateways don't keep per-VLAN bridge tables — the
+	// walks fail noisily for zero evidence — so marked routers skip the
+	// step entirely: not applicable, not a failure. Everything else
+	// (interfaces, VLANs, neighbors) is attempted as normal.
+	if dev.Function == "router" {
+		p.logger.Debug("snmp: router device, skipping mac table", "device_id", dev.ID)
+	} else {
+		n, err := p.pollMACs(ctx, dev, cfg, ifaceIDs, vlans, now)
+		if err != nil {
+			return p.pollFailed(ctx, dev, now, err)
+		}
+		items += n
 	}
-	items += n
 
 	// Neighbors: LLDP + CDP, replace-per-device.
-	n, err = p.pollNeighbors(ctx, dev, client, ifaceIDs, now)
+	nNbr, err := p.pollNeighbors(ctx, dev, client, ifaceIDs, now)
 	if err != nil {
 		return p.pollFailed(ctx, dev, now, err)
 	}
-	items += n
+	items += nNbr
 
 	if err := p.store.UpdateDevicePollHealth(ctx, dev.ID, nil, now); err != nil {
 		return items, fmt.Errorf("record poll health: %w", err)

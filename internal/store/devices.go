@@ -118,11 +118,11 @@ func (s *Store) resolveDeviceID(ctx context.Context, nameOrIP string) (int64, er
 func (s *Store) GetDeviceByID(ctx context.Context, id int64) (*domain.Device, error) {
 	var d domain.Device
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
+		SELECT id, name, mgmt_ip, coalesce(function, ''), protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
 		       coalesce(routeros_username, ''), routeros_password_enc,
 		       coalesce(routeros_port, 8728),
 		       last_poll_at, consecutive_failures
-		FROM network_devices WHERE id = $1`, id).Scan(&d.ID, &d.Name, &d.MgmtIP, &d.ProtocolFamily, &d.Role,
+		FROM network_devices WHERE id = $1`, id).Scan(&d.ID, &d.Name, &d.MgmtIP, &d.Function, &d.ProtocolFamily, &d.Role,
 		&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec,
 		&d.RouterOSUsername, &d.RouterOSPasswordEnc, &d.RouterOSPort,
 		&d.LastPollAt, &d.ConsecutiveFailures)
@@ -212,7 +212,7 @@ func (s *Store) ListCoreDevices(ctx context.Context) ([]domain.Device, error) {
 // it is an ARP-collector-only concept.
 func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) ([]domain.Device, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, mgmt_ip, protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
+		SELECT id, name, mgmt_ip, coalesce(function, ''), protocol_family, role, enabled, snmp_profile_id, poll_interval_sec,
 		       coalesce(routeros_username, ''), routeros_password_enc,
 		       coalesce(routeros_port, 8728),
 		       last_poll_at, consecutive_failures
@@ -227,7 +227,7 @@ func (s *Store) ListEnabledDevicesByFamily(ctx context.Context, family string) (
 	var devices []domain.Device
 	for rows.Next() {
 		var d domain.Device
-		if err := rows.Scan(&d.ID, &d.Name, &d.MgmtIP, &d.ProtocolFamily, &d.Role,
+		if err := rows.Scan(&d.ID, &d.Name, &d.MgmtIP, &d.Function, &d.ProtocolFamily, &d.Role,
 			&d.Enabled, &d.SNMPProfileID, &d.PollIntervalSec,
 			&d.RouterOSUsername, &d.RouterOSPasswordEnc, &d.RouterOSPort,
 			&d.LastPollAt, &d.ConsecutiveFailures); err != nil {

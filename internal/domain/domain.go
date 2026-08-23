@@ -53,6 +53,7 @@ type Device struct {
 	Name                string
 	MgmtIP              netip.Addr
 	ProtocolFamily      string
+	Function            string // switch | router | firewall | ... (from import; informational)
 	Role                string
 	Enabled             bool
 	SNMPProfileID       *int64
