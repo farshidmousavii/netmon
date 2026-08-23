@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/farshidmousavii/bidar/internal/crypto"
@@ -16,6 +18,8 @@ import (
 	"github.com/farshidmousavii/bidar/internal/providers/arp"
 	"github.com/farshidmousavii/bidar/internal/providers/dhcp"
 	"github.com/farshidmousavii/bidar/internal/providers/icmpsweep"
+	mikrotikpoll "github.com/farshidmousavii/bidar/internal/providers/mikrotik"
+	snmppoll "github.com/farshidmousavii/bidar/internal/providers/snmp"
 	"github.com/farshidmousavii/bidar/internal/scheduler"
 	"github.com/farshidmousavii/bidar/internal/store"
 	"github.com/spf13/cobra"
@@ -25,17 +29,23 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Run the inventory daemon",
 	Long: `Run the inventory daemon: the four Phase 1 providers (AD, ARP,
-DHCP, ICMP) as scheduled loops, each run logged to provider_runs.
+DHCP, ICMP) as scheduled loops, each run logged to provider_runs, plus
+the Phase 2 polling queue — Cisco and MikroTik devices polled through
+the discovery_jobs table by a worker pool, with per-device health and
+circuit-breaker backoff on network_devices.
 
 Environment (the daemon is env-configured, not --config):
-  BIDAR_DATABASE_URL    Postgres connection string (required)
-  BIDAR_MASTER_KEY      base64 32-byte key (required; validated at startup)
-  BIDAR_LOG_LEVEL       debug|info|warn|error (default info)
-  BIDAR_AD_INTERVAL     AD sync cadence (default 24h; AD is optional —
-                        skipped with a warning when BIDAR_AD_* unset)
-  BIDAR_ARP_INTERVAL    ARP poll cadence (default 5m)
-  BIDAR_DHCP_INTERVAL   DHCP poll cadence (default 5m)
-  BIDAR_ICMP_INTERVAL   ICMP sweep cadence (default 5m)
+  BIDAR_DATABASE_URL      Postgres connection string (required)
+  BIDAR_MASTER_KEY        base64 32-byte key (required; validated at startup)
+  BIDAR_LOG_LEVEL         debug|info|warn|error (default info)
+  BIDAR_AD_INTERVAL       AD sync cadence (default 24h; AD is optional —
+                          skipped with a warning when BIDAR_AD_* unset)
+  BIDAR_ARP_INTERVAL      ARP poll cadence (default 5m)
+  BIDAR_DHCP_INTERVAL     DHCP poll cadence (default 5m)
+  BIDAR_ICMP_INTERVAL     ICMP sweep cadence (default 5m)
+  BIDAR_JOB_WORKERS       polling-queue worker count (default 5)
+  BIDAR_ENQUEUE_INTERVAL  queue enqueue-pass cadence (default 1m)
+  BIDAR_JOB_LEASE         max duration of one claimed job (default 10m)
 
 The schema must already be migrated with ` + "`bidar migrate`" + ` — serve
 never applies migrations itself and fails clearly if the schema is
@@ -103,12 +113,81 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	sched := scheduler.New(st, logger, jobs)
-	sched.Run(ctx)
+
+	queue, err := buildQueue(logger, st, enc)
+	if err != nil {
+		return err
+	}
+
+	// Decision D (architecture.md): Phase 2 device polling runs entirely
+	// through discovery_jobs; the Phase 1 collectors keep their simple
+	// loops. Both families run until ctx is cancelled.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		sched.Run(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		if err := queue.Run(ctx); err != nil {
+			logger.Error("polling queue exited with error", "err", err)
+		}
+	}()
+	wg.Wait()
 
 	logger.Info("shutting down", "reason", ctx.Err().Error())
 	return nil
+}
+
+// buildQueue constructs the Phase 2 polling queue: Cisco devices via the
+// SNMP provider, MikroTik devices via the RouterOS provider, both as
+// per-device executors over discovery_jobs.
+func buildQueue(logger *slog.Logger, st *store.Store, enc *crypto.Encryptor) (*scheduler.QueueRunner, error) {
+	workers, err := intFromEnv(envconfig.JobWorkers, 5)
+	if err != nil {
+		return nil, err
+	}
+	enqInterval, err := intervalFromEnv(envconfig.EnqueueInterval, time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	lease, err := intervalFromEnv(envconfig.JobLease, 10*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+
+	snmpP, err := snmppoll.New(st, enc, logger)
+	if err != nil {
+		return nil, fmt.Errorf("build snmp provider: %w", err)
+	}
+	mtP, err := mikrotikpoll.New(st, enc, logger)
+	if err != nil {
+		return nil, fmt.Errorf("build mikrotik provider: %w", err)
+	}
+
+	return scheduler.NewQueueRunner(st, logger, scheduler.QueueConfig{
+		Workers:         workers,
+		EnqueueInterval: enqInterval,
+		Lease:           lease,
+	}, map[string]scheduler.Executor{
+		"snmp":     snmpP.PollDeviceByID,
+		"mikrotik": mtP.PollDeviceByID,
+	})
+}
+
+// intFromEnv parses a positive integer env var, defaulting when unset.
+func intFromEnv(name string, def int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s: invalid positive integer %q", name, raw)
+	}
+	return n, nil
 }
 
 // buildJobs constructs the four provider jobs. AD is optional: without
