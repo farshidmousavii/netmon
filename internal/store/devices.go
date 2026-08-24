@@ -132,6 +132,26 @@ func (s *Store) GetDeviceByID(ctx context.Context, id int64) (*domain.Device, er
 	return &d, nil
 }
 
+// SetDeviceEnabled enables or disables a device by name-or-mgmt_ip.
+// Disabled devices are skipped by every poller (the Phase 2 queue and
+// the ARP collector both filter on enabled) without deleting any of
+// their history — the right answer for decommissioned equipment.
+func (s *Store) SetDeviceEnabled(ctx context.Context, nameOrIP string, enabled bool) (int64, error) {
+	id, err := s.resolveDeviceID(ctx, nameOrIP)
+	if err != nil {
+		return 0, err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE network_devices SET enabled = $2, updated_at = now() WHERE id = $1`, id, enabled)
+	if err != nil {
+		return 0, fmt.Errorf("set device enabled: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return 0, fmt.Errorf("%w", ErrNotFound)
+	}
+	return id, nil
+}
+
 // SetDeviceRouterOSAuth stores a MikroTik device's RouterOS API
 // credentials (password already encrypted by the caller) and optionally
 // its API port (nil leaves the stored value unchanged). Only

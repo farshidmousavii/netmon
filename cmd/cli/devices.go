@@ -42,6 +42,19 @@ Takes effect on the next scheduled poll cycle — no daemon restart needed
 	Run:  runDevicesSetRole,
 }
 
+var devicesSetEnabledCmd = &cobra.Command{
+	Use:   "set-enabled <name-or-mgmt_ip> <true|false>",
+	Short: "Enable or disable polling for a device",
+	Long: `Enable or disable a device. Disabled devices are skipped by every
+poller (the Phase 2 queue and the ARP collector) without deleting any
+history — the right answer for decommissioned or temporarily offline
+equipment.
+
+Takes effect on the next poll cycle — no daemon restart needed.`,
+	Args: cobra.ExactArgs(2),
+	Run:  runDevicesSetEnabled,
+}
+
 var devicesSetRouterOSAuthCmd = &cobra.Command{
 	Use:   "set-routeros-auth <name-or-mgmt_ip> <username> <password>",
 	Short: "Set a MikroTik device's RouterOS API credentials",
@@ -63,6 +76,7 @@ func init() {
 	devicesCmd.AddCommand(devicesListCmd)
 	devicesCmd.AddCommand(devicesSetRoleCmd)
 	devicesCmd.AddCommand(devicesSetRouterOSAuthCmd)
+	devicesCmd.AddCommand(devicesSetEnabledCmd)
 
 	devicesListCmd.Flags().String("role", "", "filter by role (core|access|unassigned)")
 	devicesSetRouterOSAuthCmd.Flags().Int("port", 0, "RouterOS API port (default: leave unchanged, device default 8728)")
@@ -180,4 +194,36 @@ func runDevicesSetRouterOSAuth(cmd *cobra.Command, args []string) {
 		msg += fmt.Sprintf(", port %d", *port)
 	}
 	fmt.Println(msg)
+}
+
+func runDevicesSetEnabled(cmd *cobra.Command, args []string) {
+	if err := logger.Init(false); err != nil {
+		log.Fatal(err)
+	}
+
+	nameOrIP := strings.TrimSpace(args[0])
+	var enabled bool
+	switch strings.ToLower(strings.TrimSpace(args[1])) {
+	case "true", "yes":
+		enabled = true
+	case "false", "no":
+		enabled = false
+	default:
+		log.Fatalf("invalid value %q (use true or false)", args[1])
+	}
+
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+	defer cancel()
+	st, closePool := devicesStore(ctx)
+	defer closePool()
+
+	id, err := st.SetDeviceEnabled(ctx, nameOrIP, enabled)
+	if err != nil {
+		log.Fatal(err)
+	}
+	state := "disabled"
+	if enabled {
+		state = "enabled"
+	}
+	fmt.Printf("device %d (%s): polling %s\n", id, nameOrIP, state)
 }

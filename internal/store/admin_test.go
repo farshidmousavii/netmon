@@ -209,3 +209,40 @@ func TestSetDeviceRouterOSAuth(t *testing.T) {
 		t.Error("expected error for empty username")
 	}
 }
+
+func TestSetDeviceEnabled(t *testing.T) {
+	st := newAdminStore(t)
+	ctx := context.Background()
+
+	seedDevice(t, st, "en-sw", "192.0.2.70", "cisco_snmp", "unassigned", true)
+
+	// Disable by name.
+	if _, err := st.SetDeviceEnabled(ctx, "en-sw", false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	var enabled bool
+	if err := st.pool.QueryRow(ctx,
+		`SELECT enabled FROM network_devices WHERE name = 'en-sw'`).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled {
+		t.Error("device still enabled after disable")
+	}
+
+	// Re-enable.
+	if _, err := st.SetDeviceEnabled(ctx, "en-sw", true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if err := st.pool.QueryRow(ctx,
+		`SELECT enabled FROM network_devices WHERE name = 'en-sw'`).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if !enabled {
+		t.Error("device still disabled after enable")
+	}
+
+	// Unknown device: ErrNotFound, same contract as set-role.
+	if _, err := st.SetDeviceEnabled(ctx, "ghost", false); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown device: err = %v, want ErrNotFound", err)
+	}
+}
