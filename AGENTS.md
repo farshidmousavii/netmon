@@ -30,19 +30,19 @@ This is **not** a commercial CMDB. Do not add complexity (microservices, Kuberne
 
 ```
 /cmd/bidar/main.go       → entrypoint (signal handling + context, already daemon-shaped)
-/cmd/cli/                → command definitions — existing: root.go, init.go, monitor.go, backup.go, exec.go, diff.go — new (Phase 0+): serve.go, migrate.go, import_devices.go, devices.go, dhcp_sources.go, hosts.go (the former config-file TUI was removed in Phase 2; Phase 5 builds the only TUI the project will have)
+/cmd/cli/                → command definitions — existing: root.go, init.go, monitor.go, backup.go, exec.go, diff.go — new (Phase 0+): serve.go, migrate.go, import_devices.go. The config-file TUI (tui.go/tui_*.go, briefly renamed `tui-config`) was removed entirely rather than extended — Phase 5's REST-API-client TUI is a separate, unrelated tool and there was no value maintaining two.
 /internal/config/       → existing YAML/CSV loader (LoadConfig, Validate, Save) — stays as-is for the legacy CLI path
 /internal/db/           → NEW (Phase 0) — pgx pool, migrations runner
 /internal/crypto/       → NEW (Phase 0) — encrypt/decrypt for DB-stored secrets, keyed by BIDAR_MASTER_KEY. Legacy YAML/CSV credentials are NOT touched by this — they stay plaintext-on-disk, operator-owned, gitignored.
 /internal/providers/    → NEW — one package per daemon evidence source (ad, arp, dhcp, icmpsweep, snmp, mikrotik, ...) — read-only, never imports internal/device
 /internal/snmp/         → EXISTING (snmp.go, types.go) — SnmpWalk (single GET, v2c only, string-typed) stays untouched for CLI compatibility. Phase 1/2 add new functions alongside it (typed walk, v3, context) — do not modify SnmpWalk's signature.
-/internal/device/        → EXISTING — SSH client + Cisco/MikroTik command execution, used only by `exec`/`backup`/`monitor`/`tui-config`. Imports internal/snmp (one-directional; snmp does not import device). Daemon code must never import this package.
+/internal/device/        → EXISTING — SSH client + Cisco/MikroTik command execution, used only by `exec`/`backup`/`monitor`. Imports internal/snmp (one-directional; snmp does not import device). Daemon code must never import this package.
 /internal/retry/         → EXISTING — reused as-is wherever retry-with-backoff is needed
 /internal/worker/        → EXISTING — check whether Phase 2's job worker pool can build on this before writing a new one
 /internal/logger/        → EXISTING — custom color logger for the CLI, left untouched. The daemon gets its own slog-based logger, injected via constructor, not routed through this package.
 /internal/report/        → EXISTING — CLI's terminal/JSON report printer, left untouched. The daemon's JSON responses come from internal/api, not this package.
 /internal/agent/collector/ → NEW (Phase 6) — agent-side hardware/OS collection, one file per OS build tag
-/internal/tui/            → NEW (Phase 5) — the new REST-API-client TUI (`bidar tui`). Distinct from cmd/cli/tui*.go, which is renamed `bidar tui-config` in Phase 0 and keeps its current file-based/SSH behavior unchanged.
+/internal/tui/            → NEW (Phase 5) — the REST-API-client TUI (`bidar tui`). The only TUI in the project — the earlier config-file TUI (`tui-config`) was removed rather than kept alongside it.
 /internal/domain/       → NEW — core types: Host, Device, Observation, Location — no I/O here
 /internal/api/          → NEW — HTTP handlers, routing, middleware
 /internal/store/        → NEW — all SQL queries, one file per table/aggregate
@@ -90,7 +90,7 @@ Currently approved:
 - `github.com/spf13/cobra` — already in go.mod, existing CLI framework; new subcommands (`serve`, `migrate`, `import-devices`) follow its existing `var fooCmd = &cobra.Command{...}` + `init(){ rootCmd.AddCommand(...) }` pattern
 - `golang.org/x/crypto` — already in go.mod (SSH); reuse for the new `internal/crypto` package if it fits, otherwise a minimal justified addition
 - `github.com/go-chi/chi/v5` — only if stdlib routing becomes unwieldy in Phase 4
-- `github.com/charmbracelet/bubbletea`, `github.com/charmbracelet/lipgloss` — already in go.mod, used by the existing TUI; reuse for the new Phase 5 `bidar tui`. `bubbles` is **not** currently used (the existing TUI has custom layouts) — do not add it unless Phase 5 genuinely needs it.
+- `github.com/charmbracelet/bubbletea`, `github.com/charmbracelet/lipgloss` — removed from go.mod along with the config-file TUI; re-add them when Phase 5 builds the new `bidar tui`. `bubbles` was never used — do not add it unless Phase 5 genuinely needs it.
 
 Environment variables use a `BIDAR_` prefix: `BIDAR_DATABASE_URL`, `BIDAR_MASTER_KEY` (for `internal/crypto`), etc. — pin every new one in `docs/roadmap.md` Phase 0 as it's introduced.
 
