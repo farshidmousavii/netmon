@@ -76,6 +76,8 @@ BIDAR_DATABASE_URL=postgres://bidar:PASSWORD@localhost:5432/bidar BIDAR_MASTER_K
 docker compose exec bidar /usr/local/bin/bidar devices list                       # see what was imported
 docker compose exec bidar /usr/local/bin/bidar devices list --role=unassigned
 docker compose exec bidar /usr/local/bin/bidar devices set-role <name-or-ip> core # one per core switch
+# decommissioned or offline device? stop polling it without deleting history:
+docker compose exec bidar /usr/local/bin/bidar devices set-enabled <name-or-ip> false
 ```
 
 5. **Register DHCP sources** (Phase 1: only `mikrotik` is
@@ -111,7 +113,7 @@ docker compose exec bidar /usr/local/bin/bidar hosts   # the live inventory
 Role and path changes take effect on the next scheduled poll cycle — no
 daemon restart needed.
 
-### Legacy CLI (monitor / backup / exec / diff / init / tui-config)
+### Legacy CLI (monitor / backup / exec / diff / init)
 
 The original SSH-based CLI still works exactly as before, reading
 `config.yaml`/`devices.csv` directly. See the sections below.
